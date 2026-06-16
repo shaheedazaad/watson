@@ -1,0 +1,71 @@
+- deviation_type: exclusion_criteria
+  summary: The article excluded reports containing positive misinformation, which was not specified as an exclusion criterion in the preregistration.
+  preregistered_plan: The preregistration specified that the topic of the misinformation would be coded as either negative (= 2) or neutral (= 1). It did not state how studies featuring positive misinformation would be handled or if they would be excluded.
+  article_report: The article notes that three reports contained positive misinformation topics and were consequently excluded from the analyzed data.
+  evidence: 
+    - Preregistration (Data items): "Topic of misconception or misinformation. We coded whether the misinformation topic was negative or neutral. (negative = 2; neutral = 1)."
+    - Article (Methods - Coding of moderators): "Only three reports from two studies contained positive misinformation topics... We thus analysed the data excluding these three reports."
+  confidence: High
+  disclosed: Yes
+  explanation_provided: Yes (Implicitly justified because they did not fit the binary negative/neutral coding scheme)
+  robustness_check: No
+
+- deviation_type: analysis_model
+  summary: The article reports two additional meta-regression models (predicting the misinformation effect, and predicting the debunking effect while controlling for the misinformation effect) that were not preregistered.
+  preregistered_plan: The preregistration explicitly planned to "perform meta-regression analyses of our debunking effect sizes with the moderators." It did not mention running separate meta-regressions to predict the initial misinformation effect or using the misinformation effect as a covariate.
+  article_report: The article features three meta-regression models in Table 3. The second regresses the misinformation effect on the moderators, and the third regresses the debunking effect controlling for the misinformation effect.
+  evidence: 
+    - Preregistration (Data synthesis): "Furthermore, we will perform meta-regression analyses of our debunking effect sizes with the moderators."
+    - Article (Results - Moderator analyses): "Therefore, we next regressed the misinformation effect of the same moderators, an analysis that appears in the second column of Table 3. Additionally, we included the misinformation effect as a covariate and conducted a meta-regression analysis of the debunking effects..."
+  confidence: High
+  disclosed: No (Not explicitly identified as a deviation from the preregistration)
+  explanation_provided: Yes ("An important consideration, however, is whether the effects of negative misinformation... might impact the misinformation impact rather than the correction per se.")
+  robustness_check: N/A (These are supplementary exploratory models expanding on the main analysis)
+
+- deviation_type: analysis_model
+  summary: The article includes "Method of effect-size calculation" as a covariate in the meta-regression, which was not listed as a moderator in the preregistration.
+  preregistered_plan: The preregistration listed specific theoretical moderators and study characteristics (e.g., misinformation topic, correction detail, domain, polarization, geography) but did not list the "method of effect-size calculation" (between- vs. within-subjects) as a moderator to be tested in the meta-regression.
+  article_report: The article includes "Method of effect-size calculation" alongside the other moderators as a predictor in the meta-regression models (Table 3).
+  evidence: 
+    - Preregistration (Data items): Section 12 lists all planned moderators (A through J) and study characteristics. Method of effect-size calculation is not listed as a variable for the meta-regression.
+    - Article (Results - Moderator analyses): Table 3 includes "Method of the effect-size calculation" under "Report and methodological characteristics" as a predictor in the models.
+  confidence: High
+  disclosed: No
+  explanation_provided: No
+  robustness_check: No
+
+- deviation_type: degree_of_freedom
+  summary: The preregistration does not specify the exact diagnostic metric or threshold that will be used to define and exclude outliers, affording researcher flexibility.
+  preregistered_plan: The preregistration states it will use the diagnostic procedures proposed by Viechtbauer and Cheung (2010) to detect influential cases, but it does not specify which of the several available metrics (e.g., studentized residuals, Cook's distance, DFFITS) or what numerical cutoff will be used to classify an effect size as an outlier.
+  article_report: The article identifies six outliers based on a specific effect size cutoff ($d < -2.37$ or $d > 2.61$) without detailing how the Viechtbauer and Cheung (2010) diagnostic metrics generated these exact boundaries.
+  evidence: 
+    - Preregistration (Risk of bias): "We will adopt the diagnostic procedures proposed by Viechtbauer and Cheung (2010) to detect influential cases... We will use the results of influential analyses to determine outliers..."
+    - Article (Methods - Bias analysis): "...six debunking effects were identified as outliers, d < -2.37 or d > 2.61."
+  confidence: High
+  disclosed: No
+  explanation_provided: No
+  robustness_check: Yes (The article reports bias analyses both with and without the outliers, adhering to the preregistration's plan to repeat analyses both ways).
+
+- deviation_type: degree_of_freedom
+  summary: The preregistered meta-regression analysis plan is underspecified, leaving flexibility in how moderators are entered into the statistical model.
+  preregistered_plan: The preregistration broadly states that meta-regression analyses will be performed with the moderators, but it does not specify if the moderators will be tested individually in univariate models, or simultaneously in a single multivariate model (and if so, how multicollinearity or interactions would be handled).
+  article_report: The article reports a single multiple meta-regression model that simultaneously includes all theoretical moderators and control factors.
+  evidence: 
+    - Preregistration (Data synthesis): "Furthermore, we will perform meta-regression analyses of our debunking effect sizes with the moderators."
+    - Article (Results - Table 3): Table 3 presents a multiple regression model where all factors are included simultaneously.
+  confidence: High
+  disclosed: No
+  explanation_provided: No
+  robustness_check: No
+
+- deviation_type: analysis_model
+  summary: The article adds a Bayesian analysis test for publication bias that was not preregistered, while appearing to omit the preregistered plan to use Bayesian analyses for testing null moderator effects.
+  preregistered_plan: The preregistration listed 7 specific tests for publication bias. It also planned to perform "Bayesian analyses if there are null effects of the moderator analyses" as a sensitivity check.
+  article_report: The article reports the 7 preregistered bias tests, but adds an 8th test—Robust Bayesian meta-analysis (RoBMA)—for publication bias. It does not appear to report Bayesian sensitivity analyses for the null effects found in the moderator analyses (e.g., detailed correction, attitudinal congeniality).
+  evidence: 
+    - Preregistration (Data synthesis & Meta-biases): "We will conduct sensitivity analyses by... performing Bayesian analyses if there are null effects of the moderator analyses." and lists 7 specific bias tests in Item 16.
+    - Article (Table 2 & Methods): Table 2 includes "Robust Bayesian meta-analysis" as an eighth bias test.
+  confidence: Medium
+  disclosed: No
+  explanation_provided: No
+  robustness_check: Yes (The RoBMA is reported alongside the 7 originally preregistered bias tests, serving as an additional check).

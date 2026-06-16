@@ -1,0 +1,81 @@
+# Watson Preregistration Adherence Report
+
+<p><strong><span style="color: orange;">Warning:</span></strong> Interpret these results with caution. Watson's output should be checked manually by the user before drawing conclusions.</p>
+
+Generated at: `2026-06-16T17:27:40.337084+00:00`
+Model: `gemini-3.1-pro-preview`
+
+## Summary
+
+Checked 1 preregistered study/studies. 0 failed. 0 study/studies were skipped because they were not ready for deviation checking.
+
+## Study Reports
+
+### Meta-analysis
+
+- Article: `s41562-023-01623-8.pdf`
+- Preregistration: `open-ended_registration-v3.pdf`
+- Status: `completed`
+
+#### Overall Assessment
+
+The study adhered to many components of its preregistration, including the systematic search approach, database selection, general methodology, and bias testing suite. However, it exhibits a few noteworthy deviations. An unpreregistered exclusion rule was introduced for positive misinformation. Furthermore, additional analyses involving the misinformation effect were presented alongside the primary analysis without explicit exploratory framing. A researcher degree of freedom was also identified in the underspecified formulation of the meta-regression model, which afforded the flexibility to include unregistered covariates (e.g., method of effect-size calculation) and omit others (e.g., age and gender).
+
+| Type | Confidence | Summary |
+| --- | --- | --- |
+| exclusion\_criteria | High | The article excluded three reports containing positive misinformation topics, which was not an exclusion criterion specified in the preregistration. |
+| exploratory\_framing | High | The article presents two meta-regression models focusing on the misinformation effect that were not specified in the preregistered analysis plan. |
+| analysis\_model | High | The meta-regression includes the 'method of the effect-size calculation' as a control variable, which was not listed as a moderator or covariate in the preregistration. |
+| degree\_of\_freedom | High | The preregistered analysis plan for the meta-regression left the exact model specification undefined, granting researchers flexibility in deciding which coded variables to include and how to enter them. |
+
+#### Finding 1: exclusion\_criteria
+
+- Confidence: High
+- Disclosed: Yes
+- Explanation given: Yes
+- Robustness check: No
+
+Preregistered plan: The preregistration outlines several specific eligibility and exclusion criteria and mentions coding the topic as negative or neutral, but does not state that positive misinformation will be excluded from the analysis.
+
+Article report: The article explicitly states that "Only three reports from two studies contained positive misinformation topics... We thus analysed the data excluding these three reports."
+
+Evidence: Preregistration: 'Eligibility criteria' (Page 4) and 'Data items' (Page 6). Article: 'Coding of moderators' > 'Misinformation factors. Negativity of the misinformation' (Page 8).
+
+#### Finding 2: exploratory\_framing
+
+- Confidence: High
+- Disclosed: No
+- Explanation given: Yes
+- Robustness check: No
+
+Preregistered plan: The preregistration only planned to "perform meta-regression analyses of our debunking effect sizes with the moderators."
+
+Article report: In Table 3, the article reports a meta-regression of the 'Misinformation effect' and another of the 'Debunking effect controlling for the misinformation effect', interpreting them in the results and discussion without labeling them as exploratory.
+
+Evidence: Preregistration: 'Data synthesis' section (Page 7). Article: 'An important consideration...' paragraph (Page 4) and Table 3.
+
+#### Finding 3: analysis\_model
+
+- Confidence: High
+- Disclosed: Yes
+- Explanation given: Yes
+- Robustness check: No
+
+Preregistered plan: The preregistration lists specific variables to be coded and used as moderators (e.g., topic, detail, in-person, attitudinal congruence) but only mentions the effect-size calculation method as a step for computing standard sizes.
+
+Article report: The article includes 'method of effect-size calculation (that is, between subjects versus within subjects)' as a control characteristic in the main meta-regression model.
+
+Evidence: Preregistration: 'Data items' (Pages 5-6). Article: 'The present study' (Page 2) and Table 3 (Page 4).
+
+#### Finding 4: degree\_of\_freedom
+
+- Confidence: High
+- Disclosed: No
+- Explanation given: No
+- Robustness check: No
+
+Preregistered plan: The preregistration broadly states "we will perform meta-regression analyses of our debunking effect sizes with the moderators." It does not specify whether this will be a multiple regression with all coded variables entered simultaneously or separate models, nor does it explicitly state which of the coded 'study characteristics' (like age and gender) will be used as covariates.
+
+Article report: The article reports a single multiple meta-regression model containing 11 variables, entering them simultaneously while omitting coded variables such as mean age and gender percentages.
+
+Evidence: Preregistration: 'Data synthesis' (Page 7). Article: 'Moderator analyses' (Page 3) and Table 3.
