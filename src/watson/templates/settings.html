@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Settings · {{ project.name }} · Watson{% endblock %}
+{% block content %}
+<nav class="breadcrumbs"><a href="{{ url() }}">Projects</a><span>/</span><a href="{{ url('projects/' + project.id) }}">{{ project.name }}</a><span>/</span><span>Settings</span></nav>
+<div class="page-heading"><div><p class="eyebrow">Project configuration</p><h1>Settings</h1><p class="lede">Settings here apply only to {{ project.name }}.</p></div></div>
+{% if notice %}<div class="flash success" role="status">{{ notice }}</div>{% endif %}
+{% if error %}<div class="flash error" role="alert">{{ error }}</div>{% endif %}
+
+<div class="settings-grid">
+  <form class="section-card settings-form" action="{{ url('projects/' + project.id + '/settings') }}" method="post">
+    <div class="section-head"><div><h2>Processing</h2><p>Changes to these values can change the results.</p></div></div>
+    <label>Gemini model <span>Editable for preview or custom model identifiers.</span><input name="model" value="{{ settings.model }}" maxlength="200" required></label>
+    <label>Reasoning effort <span>Higher levels may take longer and use more resources.</span>
+      <select name="thinking_level">
+        {% for value in ['minimal', 'low', 'medium', 'high'] %}<option value="{{ value }}" {% if settings.thinking_level == value %}selected{% endif %}>{{ value|capitalize }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Document context <span>Optional notes explaining filenames, article roles, or study naming.</span><textarea name="file_context" maxlength="20000" rows="8" placeholder="Example: paper.pdf is the main article; osf-registration.pdf covers Study 2.">{{ settings.file_context }}</textarea></label>
+    {% if has_outputs %}
+    <label class="check-row"><input type="checkbox" name="confirm_invalidation" value="yes"><span><strong>Confirm result reset</strong>Changing processing settings clears generated outputs, but always keeps source inputs.</span></label>
+    {% endif %}
+    <button class="primary" type="submit">Save project settings</button>
+  </form>
+
+  <div>
+    <details class="section-card settings-form" {% if credential_storage == 'none' %}open{% endif %}>
+      <summary>Gemini credential <span class="status {{ 'complete' if credential_storage != 'none' else 'failed' }}">{{ 'encrypted app vault' if credential_storage == 'app_vault' else credential_storage }}</span></summary>
+      <p class="muted">The key is encrypted in Watson's application-data folder and protected with user-only file permissions. It is never written to project files, URLs, logs, reports, or exports. Anyone with full access to your operating-system account can still access the local vault.</p>
+      {% if credential_storage == 'session' %}<div class="flash warning">The encrypted app vault was unavailable. The current key exists only in memory and disappears when Watson closes.</div>{% endif %}
+      <form action="{{ url('credentials') }}" method="post">
+        <input type="hidden" name="project_id" value="{{ project.id }}">
+        <label>Gemini API key <input type="password" name="api_key" autocomplete="off" placeholder="Paste a new key" required></label>
+        <button class="primary" type="submit">Save API key</button>
+      </form>
+      {% if credential_storage != 'none' %}<form action="{{ url('credentials/delete') }}" method="post"><input type="hidden" name="project_id" value="{{ project.id }}"><button class="danger-text" type="submit">Delete saved key</button></form>{% endif %}
+    </details>
+  </div>
+</div>
+{% endblock %}

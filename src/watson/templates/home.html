@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Projects · Watson{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <p class="eyebrow">Research workspaces</p>
+    <h1>Projects</h1>
+    <p class="lede">Create a project, add its source documents, then run the preregistration review.</p>
+  </div>
+  <form class="create-form" action="{{ url('projects') }}" method="post">
+    <label for="project-name">New project</label>
+    <div class="inline-fields">
+      <input id="project-name" name="name" maxlength="100" placeholder="e.g. Memory study replication" required autofocus>
+      <button class="primary" type="submit">Create</button>
+    </div>
+  </form>
+</div>
+
+{% if error %}<div class="flash error" role="alert">{{ error }}</div>{% endif %}
+
+<section class="section-card">
+  <div class="section-head">
+    <div>
+      <h2>Your projects</h2>
+      <p>{{ total }} total</p>
+    </div>
+    <form class="search" method="get" action="{{ url() }}">
+      <input type="search" name="q" value="{{ query }}" placeholder="Search projects" aria-label="Search projects">
+      <button class="quiet" type="submit">Search</button>
+    </form>
+  </div>
+
+  {% if projects %}
+  <div class="project-grid">
+    {% for summary in projects %}
+    <a class="project-card" href="{{ url('projects/' + summary.metadata.id) }}">
+      <div class="project-card-top">
+        <span class="folder-icon">⌁</span>
+        {% if summary.latest_job_state %}<span class="status {{ summary.latest_job_state }}">{{ summary.latest_job_state }}</span>{% endif %}
+      </div>
+      <h3>{{ summary.metadata.name }}</h3>
+      <p>{{ summary.input_count }} input{% if summary.input_count != 1 %}s{% endif %}</p>
+      <div class="project-meta">
+        {% if summary.has_deviation_report %}Review complete
+        {% elif summary.has_inventory %}Inventory ready
+        {% else %}Waiting for documents{% endif %}
+        <span>Updated {{ summary.metadata.updated_at.strftime('%d %b %Y') }}</span>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-glyph">W</div>
+    <h3>{% if query %}No matching projects{% else %}Start with a project{% endif %}</h3>
+    <p>{% if query %}Try a different search term.{% else %}Name the research project above. Watson will create and manage its workspace for you.{% endif %}</p>
+  </div>
+  {% endif %}
+
+  {% if pages > 1 %}
+  <nav class="pagination" aria-label="Project pages">
+    {% if page > 1 %}<a href="{{ url() }}?q={{ query|urlencode }}&page={{ page - 1 }}">Previous</a>{% endif %}
+    <span>Page {{ page }} of {{ pages }}</span>
+    {% if page < pages %}<a href="{{ url() }}?q={{ query|urlencode }}&page={{ page + 1 }}">Next</a>{% endif %}
+  </nav>
+  {% endif %}
+</section>
+{% endblock %}

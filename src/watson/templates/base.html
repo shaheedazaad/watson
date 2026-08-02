@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Watson{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url('static/watson.css') }}">
+  <script src="{{ url('static/watson.js') }}" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="{{ url() }}" aria-label="Watson projects">
+      <span class="brand-mark">W</span>
+      <span>Watson</span>
+    </a>
+    <span class="local-badge"><i></i> Private · this computer</span>
+  </header>
+  <main class="shell">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

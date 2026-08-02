@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+if [ "$(uname -s)" = "Darwin" ]; then
+  INSTALL_ROOT="$HOME/Library/Application Support/Watson/app"
+else
+  INSTALL_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/watson-app"
+fi
+exec pixi run --manifest-path "$INSTALL_ROOT/pixi.toml" watson "$@"

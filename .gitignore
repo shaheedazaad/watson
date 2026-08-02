@@ -1,0 +1,15 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+.venv*/
+.pixi/
+.watson/
+watson-inventory-report.md
+dist/
+build/
+*.egg-info/
+overhaul.md

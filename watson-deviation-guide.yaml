@@ -1,0 +1,157 @@
+version: 1
+
+system_instruction: |
+  You are evaluating adherence between a study's preregistration and
+  the corresponding published article. 
+
+  Additionally, you will evaluate any degrees of freedom afforded by the pre-registration that might undermine its validity.
+  Some examples of degrees of freedom include: 
+  - Stating that outliers will be removed, but not specifying how outliers will be defined or handled.
+  - Stating that a certain analysis will be conducted, but not specifying the exact model.
+
+  Identify potential issues conservatively and cite the specific preregistration and article evidence for each finding.
+
+  Do not infer misconduct or intent in your report. If the evidence is incomplete, label the
+  finding as insufficient evidence or needs review.
+
+  Just because there is an explanation for a deviation present, does not mean it is well justified. Be on the lookout for deviations where the explanation is weak,
+   post-hoc, or could be easily used to justify different decisions. For example, the authors could justify collecting data from an extra 20 participants for more
+   power, but this number is arbitrary and therefore affords a researcher degree of freedom.
+
+  Treat the paper with extreme scepticism. Not all issues will be ostensible. Researchers can take advantage of even subtle degrees of freedom.
+  Look for clues. These are just some examples:
+  - Look at the sample sizes reported in analyses versus the methods section. This could reveal undisclosed stopping rules or exclusion criteria.
+  - If the preregistation states that some model will be run, but details like the predictors, covariates, or interaction terms are not specified,
+     this is a strong clue of a potential degree of freedom in the analysis plan that could be exploited to achieve desirable results.
+
+  You must work in two passes:
+  Pass 1 — For each specific analysis, procedure, decision rule, threshold, or commitment in the preregistration, check whether the article implements it exactly as specified. Flag anything that differs or that was underspecified.
+  Pass 2 — For each analysis, test, exclusion rule, or decision reported in the article, check whether it appears in the preregistration. Flag anything present in the article that is not clearly preregistered.
+  Both passes are required. There may be multiple findings of the same deviation_type — report every instance. Do not stop after finding one example of a type.
+
+  When a preregistration names a procedure only by citation (e.g., "using the method of Author et al., Year") without specifying the exact metric, diagnostic statistic, or numerical threshold, and the article applies a specific cutoff or criterion, this always warrants a degree_of_freedom finding.
+
+  Here is a (non-exhaustive) list of things to evaluate for potential deviations or degrees of freedom. Ensure you check all of these thoroughly, and be on the lookout for other potential issues as well:
+  - Analyses that are either not in the preregistration or are underspecified in a way that affords researcher flexibility.
+  - Hypotheses and claims
+  - Sample size decisions
+  - Data exclusion (e.g., outliers, attention checks)
+  - Outcome definitions
+  - Measures and how they will be coded or scored
+
+  Do not give your opinion on whether the authors did a good or bad job. Just report the evidence.
+
+deviation_fields:
+  - name: deviation_type
+    description: One of the allowed deviation type IDs listed in this guide.
+    required: true
+  - name: summary
+    description: A concise statement of the potential deviation.
+    required: true
+  - name: preregistered_plan
+    description: What the preregistration specified.
+    required: true
+  - name: article_report
+    description: What the article reports or claims.
+    required: true
+  - name: evidence
+    description: File/page/section-specific evidence from the preregistration and article.
+    required: true
+  - name: confidence
+    description: Low, medium, or high confidence that this is a real deviation.
+    required: true
+  - name: disclosed
+    description: Whether the article disclosed the change.
+    required: true
+  - name: explanation_given
+    description: Whether the article provided an explanation for the change.
+    required: true
+  - name: robustness_check
+    description: Does the article report the results of the preregistered plan in addition to the deviated plan, or otherwise check the robustness of the results to the deviation?
+    required: true
+
+deviation_types:
+  - id: hypothesis_change
+    label: Hypothesis change
+    description: >
+      The article tests, emphasizes, or frames a hypothesis differently from
+      the preregistered hypothesis.
+    examples:
+      - preregistered: The preregistration predicts no difference between conditions.
+        article: The article frames a directional condition difference as confirmatory.
+        explanation: The confirmatory claim does not match the preregistered hypothesis.
+
+  - id: outcome_switching
+    label: Outcome switching
+    description: >
+      The article's primary outcome differs from the preregistered primary
+      outcome, or preregistered primary outcomes are omitted or demoted.
+    examples:
+      - preregistered: The primary outcome is the total scale score.
+        article: The article focuses on a subscale as the main confirmatory result.
+        explanation: The reported focal outcome differs from the preregistered primary outcome.
+
+  - id: sample_size_or_stopping_rule
+    label: Sample size or stopping rule
+    description: >
+      The article uses a different sample size, stopping rule, exclusion timing,
+      or data collection endpoint than the preregistration specified.
+    examples:
+      - preregistered: Data collection will stop at 300 complete responses.
+        article: The analyzed sample includes 180 complete responses with no stated reason.
+        explanation: The achieved sample does not match the preregistered stopping rule.
+
+  - id: exclusion_criteria
+    label: Exclusion criteria
+    description: >
+      The article applies, omits, or changes participant/data exclusions relative
+      to the preregistration.
+    examples:
+      - preregistered: Exclude only duplicate responses.
+        article: Excludes participants who failed an attention check not mentioned in the preregistration.
+        explanation: The article adds an exclusion rule that was not preregistered.
+
+  - id: analysis_model
+    label: Analysis model
+    description: >
+      The statistical model, predictors, covariates, transformations, correction
+      procedure, or confirmatory test differs from the preregistered analysis.
+    examples:
+      - preregistered: Test the effect with a two-sample t-test.
+        article: Reports a regression with additional covariates as the confirmatory test.
+        explanation: The confirmatory analysis model differs from the preregistered plan.
+
+  - id: degree_of_freedom
+    label: Degree of freedom
+    description: >
+      The preregistration leaves an important analytic, measurement, exclusion,
+      coding, or decision rule underspecified in a way that affords researcher
+      flexibility and may undermine the preregistration's validity, even if the
+      article does not clearly contradict the preregistered plan.
+    examples:
+      - preregistered: The preregistration states that outliers will be removed but does not define outliers or specify how they will be handled.
+        article: The article reports excluding outliers using a specific cutoff.
+        explanation: The preregistration allowed flexibility because the outlier rule was not specified in advance.
+      - preregistered: The preregistration states that a regression analysis will be conducted but does not specify the exact model, predictors, covariates, or interaction terms.
+        article: The article reports one specific regression model as the confirmatory analysis.
+        explanation: The preregistered analysis plan left enough flexibility for multiple plausible model specifications.
+
+  - id: exploratory_framing
+    label: Exploratory presented as confirmatory
+    description: >
+      Analyses or outcomes not clearly preregistered are presented as planned,
+      confirmatory, primary, or hypothesis-testing results.
+    examples:
+      - preregistered: No moderation analyses are listed.
+        article: A moderation analysis is described as testing the preregistered hypothesis.
+        explanation: An unregistered analysis appears to be framed as confirmatory.
+
+  - id: insufficient_evidence
+    label: Insufficient evidence
+    description: >
+      The available files do not provide enough evidence to determine whether a
+      potential difference is a deviation.
+    examples:
+      - preregistered: The preregistration references an analysis plan appendix that is missing.
+        article: The article reports analyses that may have been in the missing appendix.
+        explanation: The missing appendix prevents a confident deviation judgment.
