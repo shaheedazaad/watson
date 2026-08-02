@@ -74,3 +74,13 @@ watson
 ```
 
 Validate bundled runtime assets with `pixi run verify-assets`. The human-editable default deviation guide is `watson-deviation-guide.yaml`; validate it with `watson deviation-guide validate`.
+
+## Publishing a release
+
+There is no manual build or archive step. Update the matching version in `pyproject.toml` and `pixi.toml`, refresh `pixi.lock` if needed, commit the changes on `main`, and run:
+
+```sh
+scripts/release.sh
+```
+
+The script reads the version from the manifests, refuses to release a dirty worktree or a version mismatch, runs the locked test suite, pushes `main`, and pushes the version tag. The tag starts the GitHub Actions release workflow, which tests the tagged source again, creates both installer archives, and publishes them to the GitHub release. The existing install commands automatically download the newest release.

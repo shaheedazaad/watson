@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Test and publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@v6
+
+      - name: Install the locked Pixi environment
+        uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          pixi-version: v0.75.0
+          locked: true
+
+      - name: Verify the release version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          expected_version="${RELEASE_TAG#v}"
+          package_version="$(pixi run python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          workspace_version="$(pixi run python -c 'import tomllib; print(tomllib.load(open("pixi.toml", "rb"))["workspace"]["version"])')"
+          test "$package_version" = "$expected_version"
+          test "$workspace_version" = "$expected_version"
+
+      - name: Run the test suite
+        run: pixi run test
+
+      - name: Verify bundled runtime assets
+        run: pixi run verify-assets
+
+      - name: Build installer archives
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p dist
+          archive_root="watson-${RELEASE_TAG#v}"
+          git archive --format=tar.gz --prefix="$archive_root/" --output=dist/watson-source.tar.gz HEAD
+          git archive --format=zip --prefix="$archive_root/" --output=dist/watson-source.zip HEAD
+          test -s dist/watson-source.tar.gz
+          test -s dist/watson-source.zip
+
+      - name: Create or update the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              dist/watson-source.tar.gz \
+              dist/watson-source.zip \
+              --clobber
+          else
+            gh release create "$RELEASE_TAG" \
+              dist/watson-source.tar.gz \
+              dist/watson-source.zip \
+              --verify-tag \
+              --generate-notes \
+              --title "Watson $RELEASE_TAG"
+          fi
