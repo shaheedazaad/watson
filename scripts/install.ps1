@@ -28,6 +28,19 @@ try {
 }
 Remove-Item -Path $StagingRoot -Recurse -Force
 $LauncherDir = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps"
+$null = New-Item -ItemType Directory -Force -Path $LauncherDir
 $Launcher = Join-Path $LauncherDir "watson.cmd"
-"@echo off`r`npixi run --manifest-path `"$InstallRoot\pixi.toml`" watson %*" | Set-Content -Encoding ASCII $Launcher
-Write-Host "Watson installed. Run: watson"
+"@echo off`r`nset `"PIXI=pixi`"`r`nif exist `"%USERPROFILE%\.pixi\bin\pixi.exe`" set `"PIXI=%USERPROFILE%\.pixi\bin\pixi.exe`"`r`n`"%PIXI%`" run --manifest-path `"$InstallRoot\pixi.toml`" watson %*" | Set-Content -Encoding ASCII $Launcher
+
+$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+$PathEntries = @($UserPath -split ";" | Where-Object { $_ })
+$LauncherOnPath = $PathEntries | Where-Object {
+    $_.TrimEnd("\") -ieq $LauncherDir.TrimEnd("\")
+}
+if (-not $LauncherOnPath) {
+    $NewUserPath = (@($PathEntries) + $LauncherDir) -join ";"
+    [Environment]::SetEnvironmentVariable("Path", $NewUserPath, "User")
+    Write-Host "Watson installed. Added $LauncherDir to PATH. Open a new terminal, then run: watson"
+} else {
+    Write-Host "Watson installed. Run: watson"
+}

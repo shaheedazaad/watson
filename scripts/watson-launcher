@@ -5,4 +5,12 @@ if [ "$(uname -s)" = "Darwin" ]; then
 else
   INSTALL_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/watson-app"
 fi
-exec pixi run --manifest-path "$INSTALL_ROOT/pixi.toml" watson "$@"
+if command -v pixi >/dev/null 2>&1; then
+  PIXI="pixi"
+elif [ -x "$HOME/.pixi/bin/pixi" ]; then
+  PIXI="$HOME/.pixi/bin/pixi"
+else
+  printf 'Watson could not find Pixi. Re-run the Watson installer.\n' >&2
+  exit 1
+fi
+exec "$PIXI" run --manifest-path "$INSTALL_ROOT/pixi.toml" watson "$@"

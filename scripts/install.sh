@@ -36,4 +36,28 @@ if ! pixi install --manifest-path "$INSTALL_ROOT/pixi.toml" --locked; then
 fi
 mkdir -p "$HOME/.local/bin"
 ln -sf "$INSTALL_ROOT/scripts/watson-launcher" "$HOME/.local/bin/watson"
-printf 'Watson installed. Run: watson\n'
+
+LAUNCHER_DIR="$HOME/.local/bin"
+PATH_UPDATED=0
+case ":$PATH:" in
+  *":$LAUNCHER_DIR:"*) ;;
+  *)
+    case "${SHELL:-}" in
+      */zsh) SHELL_PROFILE="$HOME/.zshrc" ;;
+      */bash) SHELL_PROFILE="$HOME/.bashrc" ;;
+      *) SHELL_PROFILE="$HOME/.profile" ;;
+    esac
+    PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
+    if [ ! -f "$SHELL_PROFILE" ] || ! grep -Fqx "$PATH_LINE" "$SHELL_PROFILE"; then
+      printf '\n# Added by the Watson installer\n%s\n' "$PATH_LINE" >> "$SHELL_PROFILE"
+    fi
+    PATH_UPDATED=1
+    ;;
+esac
+
+printf 'Watson installed.\n'
+if [ "$PATH_UPDATED" -eq 1 ]; then
+  printf 'Added %s to PATH in %s. Restart your shell, then run: watson\n' "$LAUNCHER_DIR" "$SHELL_PROFILE"
+else
+  printf 'Run: watson\n'
+fi
