@@ -17,8 +17,6 @@ def extract_text(path: Path, max_chars: int = 80_000) -> str:
             return soup.get_text("\n", strip=True)[:max_chars]
         if suffix == ".pdf":
             return _extract_pdf(path, max_chars)
-        if suffix == ".docx":
-            return _extract_docx(path, max_chars)
     except Exception as exc:
         return f"[Text extraction failed for {path.name}: {exc}]"
     return ""
@@ -35,10 +33,3 @@ def _extract_pdf(path: Path, max_chars: int) -> str:
         if sum(len(chunk) for chunk in chunks) >= max_chars:
             break
     return "\n".join(chunks)[:max_chars]
-
-
-def _extract_docx(path: Path, max_chars: int) -> str:
-    from docx import Document
-
-    document = Document(str(path))
-    return "\n".join(paragraph.text for paragraph in document.paragraphs)[:max_chars]

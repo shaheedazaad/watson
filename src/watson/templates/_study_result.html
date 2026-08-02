@@ -1,0 +1,46 @@
+<details class="study-result" id="{{ item.anchor }}">
+  <summary>
+    <span class="study-result-main"><strong>{{ item.label }}</strong><small>{{ item.detail or 'No narrative assessment was returned.' }}</small></span>
+    <span class="status {{ item.status }}">{{ item.status }}</span>
+    {% if item.deviations is not none %}<span class="finding-count">{{ item.deviations }} finding{% if item.deviations != 1 %}s{% endif %}</span>{% endif %}
+    <span class="disclosure-arrow" aria-hidden="true">⌄</span>
+  </summary>
+  <div class="study-result-body">
+    {% if item.apa_citation %}<blockquote>{{ item.apa_citation }}</blockquote>{% endif %}
+    <dl class="source-meta">
+      {% if item.article_file_path %}<div><dt>Article</dt><dd>{{ item.article_file_path }}</dd></div>{% endif %}
+      {% if item.article_location %}<div><dt>Article location</dt><dd>{{ item.article_location }}</dd></div>{% endif %}
+      {% if item.preregistered %}<div><dt>Article says preregistered</dt><dd>{{ item.preregistered }}</dd></div>{% endif %}
+      {% if item.preregistration_file_path %}<div><dt>Preregistration</dt><dd>{{ item.preregistration_file_path }}</dd></div>{% endif %}
+      {% if item.match_confidence is defined %}<div><dt>Match confidence</dt><dd>{{ (item.match_confidence * 100)|round|int }}%</dd></div>{% endif %}
+    </dl>
+    {% if item.rationale %}<div class="assessment"><h4>Match rationale</h4><p>{{ item.rationale }}</p></div>{% endif %}
+    {% if item.detail %}<div class="assessment"><h4>Overall assessment</h4><p>{{ item.detail }}</p></div>{% endif %}
+    {% if item.error %}<div class="flash error">{{ item.error }}</div>{% endif %}
+    {% if item.review_notes %}<div class="inline-notes"><h4>Review notes</h4><ul>{% for note in item.review_notes %}<li>{{ note }}</li>{% endfor %}</ul></div>{% endif %}
+    {% if item.findings %}
+    <div class="finding-list">
+      {% for finding in item.findings %}
+      <article class="finding-card">
+        <header>
+          <span>Finding {{ finding.number }}</span>
+          <h4>{{ finding.deviation_type|replace('_', ' ')|title }}</h4>
+          {% if finding.confidence %}<span class="confidence">{{ finding.confidence }} confidence</span>{% endif %}
+        </header>
+        {% if finding.summary %}<p class="finding-summary">{{ finding.summary }}</p>{% endif %}
+        <div class="finding-comparison">
+          <section><h5>Preregistered plan</h5><p>{{ finding.preregistered_plan or 'Not reported' }}</p></section>
+          <section><h5>Article report</h5><p>{{ finding.article_report or 'Not reported' }}</p></section>
+        </div>
+        <section class="finding-evidence"><h5>Evidence</h5><p>{{ finding.evidence or 'No evidence text was returned.' }}</p></section>
+        <dl class="finding-flags">
+          <div><dt>Disclosed</dt><dd>{{ finding.disclosed or 'Not reported' }}</dd></div>
+          <div><dt>Explanation given</dt><dd>{{ finding.explanation_given or 'Not reported' }}</dd></div>
+          <div><dt>Robustness check</dt><dd>{{ finding.robustness_check or 'Not reported' }}</dd></div>
+        </dl>
+      </article>
+      {% endfor %}
+    </div>
+    {% elif item.deviations == 0 %}<p class="no-findings">No structured findings were returned for this study.</p>{% endif %}
+  </div>
+</details>

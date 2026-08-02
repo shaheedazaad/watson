@@ -4,26 +4,28 @@ build-backend = "hatchling.build"
 
 [project]
 name = "watson-research-cli"
-version = "0.1.0"
-description = "CLI for inventorying psychology articles, preregistrations, and supplemental materials."
+version = "0.2.0"
+description = "Private localhost app for inventorying psychology articles and checking preregistration adherence."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
   "beautifulsoup4>=4.12,<5",
   "click>=8.1,<8.2",
+  "cryptography>=43,<51",
+  "fastapi>=0.115,<0.116",
   "google-genai>=1.47,<2",
-  "keyring>=25,<26",
+  "jinja2>=3.1,<4",
   "pydantic>=2.7,<3",
   "pypdf>=6.13,<7",
+  "python-multipart>=0.0.20,<0.1",
   "pyyaml>=6,<7",
-  "python-docx>=1.2,<2",
-  "rich>=13.9,<14",
-  "textual>=0.89,<1",
   "typer>=0.12.5,<0.13",
+  "uvicorn>=0.35,<0.36",
 ]
 
 [project.optional-dependencies]
 dev = [
+  "httpx>=0.27,<1",
   "pytest>=8.0,<9",
 ]
 
@@ -32,6 +34,20 @@ watson = "watson.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/watson"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"watson-deviation-guide.yaml" = "watson/assets/watson-deviation-guide.yaml"
+"scripts/rebuild_reports.py" = "watson/assets/rebuild_reports.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+  "/README.md",
+  "/watson-deviation-guide.yaml",
+  "/pixi.toml",
+  "/scripts",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

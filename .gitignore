@@ -6,8 +6,10 @@ __pycache__/
 .ruff_cache/
 .venv/
 .venv*/
+.pixi/
 .watson/
 watson-inventory-report.md
 dist/
 build/
 *.egg-info/
+overhaul.md

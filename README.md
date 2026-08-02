@@ -1,78 +1,76 @@
 # Watson
 
-Watson is a Textual terminal app for inventorying a directory of psychology
-research materials and checking preregistration adherence.
+Watson is a private, local browser app for organizing psychology research materials and reviewing preregistration adherence. Source documents and generated results stay on the computer. Watson sends document content to the configured Gemini model only when the user starts processing.
 
-The app helps you choose the research folder, previews the files Watson will
-inspect, and then lets you run inventory or preregistration adherence checks. A
-Settings screen lets you add, replace, or delete your Gemini API key and change
-the default model.
+## Install
 
-Leave `Overwrite previous results` unchecked to preserve existing completed
-results where possible. Check it before running inventory or deviation checking
-to overwrite saved Watson outputs for that step.
+macOS or Linux:
 
-## Install for development
-
-```bash
-python -m pip install -e ".[dev]"
+```sh
+curl -fsSL https://raw.githubusercontent.com/shaheedazaad/watson/main/scripts/install.sh | sh
 ```
 
-## Run The App
+Windows PowerShell:
 
-```bash
+```powershell
+irm https://raw.githubusercontent.com/shaheedazaad/watson/main/scripts/install.ps1 | iex
+```
+
+The installer uses Pixi's locked, multi-platform environment. Re-run the same command to update to the latest release.
+
+## Run
+
+```sh
 watson
 ```
 
-or
+Watson binds only to `127.0.0.1`, selects an available port, creates a new random access token, opens the default browser, and remains attached to the terminal. Press Ctrl+C to stop it. `watson web` is an explicit alias.
 
-```bash
-/Users/shaheedazaad/Projects/watson/.venv311/bin/watson
+In the browser:
+
+1. Create a named project.
+2. Add the article, preregistration, and relevant supplemental files.
+3. Open project settings to add the Gemini API key and optional document context.
+4. Start processing and follow live progress.
+5. Read the inventory and preregistration reports in the browser, expand individual studies to inspect every finding, or download reports and machine-readable data.
+
+Projects live in the normal per-user application-data directory. The browser workflow never requires editing that directory. API keys are encrypted in Watson's application-data vault with user-only filesystem permissions, so Watson does not trigger operating-system Keychain prompts. Someone with full access to the operating-system account can still access the local vault. If the vault cannot be written, Watson keeps the key only in memory and shows a warning.
+
+Supported inputs are PDF, TXT, CSV, HTML/HTM, XML, JSON, and RTF. Each file is limited to 50 MB and each upload request to 200 MB.
+
+## Reproducible command-line runs
+
+The noninteractive command calls the same runner as the browser app:
+
+```sh
+watson projects list
+GEMINI_API_KEY=... watson run PROJECT_ID --action all
 ```
 
-You can also launch the app explicitly:
+By default, a rerun processes only missing or failed work. Use `--retry-all` for a complete rerun. Each successful run writes `reproducibility.json` with the effective model, thinking level, seed, concurrency, platform, and relevant package versions. Result archives include source documents, machine-readable results, reports, and this metadata; credentials and Gemini upload-cache identifiers are excluded.
 
-```bash
-watson tui
+For an explicit directory import:
+
+```sh
+watson projects create "Replication 2" --import-dir "/path/with spaces/materials"
 ```
 
-On first run, Watson prompts for a Gemini API key and saves it for later use.
-The preferred storage is the system keyring; if that is unavailable, Watson
-falls back to `.watson/config.json`.
+## Development
 
-Generated files:
+With Pixi:
 
-- `.watson/inventory.json`
-- `.watson/study-map.json`
-- `.watson/gemini-files.json`
-- `watson-inventory-report.md`
-- `.watson/deviation-checks.json`
-- `.watson/deviation-results/*.json`
-- `watson-prereg-adherence-report.md`
-
-Global deviation guidance lives in `watson-deviation-guide.yaml`. Edit this file
-to define the system instruction, the output fields Watson should collect for
-each deviation, the allowed deviation types, and examples of each type.
-
-Validate the guide with:
-
-```bash
-watson deviation-guide validate
+```sh
+pixi install
+pixi run test
+pixi run watson
 ```
 
-You can also run inventory directly:
+Python-only editable setup:
 
-```bash
-watson init --root /path/to/research-folder
+```sh
+python -m pip install -e ".[dev]"
+pytest
+watson
 ```
 
-After inventory, run preregistration adherence checks:
-
-```bash
-watson check --root /path/to/research-folder
-```
-
-This reads `.watson/study-map.json`, checks each ready preregistered study
-against its matched preregistration file, saves each study result as JSON, and
-then writes the combined JSON and Markdown reports. Reruns are resumable:
-completed study JSON files are skipped unless you pass `--force`.
+Validate bundled runtime assets with `pixi run verify-assets`. The human-editable default deviation guide is `watson-deviation-guide.yaml`; validate it with `watson deviation-guide validate`.

@@ -47,6 +47,13 @@ class FakeDeviationClient:
         )
 
 
+class FakeStaleModelDeviationClient(FakeDeviationClient):
+    def check_preregistration_adherence(self, root: Path, study: StudyMapEntry, guide):
+        report = super().check_preregistration_adherence(root, study, guide)
+        report.model = "old-model"
+        return report
+
+
 def test_run_deviation_checks_saves_per_study_and_markdown(tmp_path: Path) -> None:
     state_dir = tmp_path / ".watson"
     state_dir.mkdir()
@@ -110,6 +117,47 @@ def test_run_deviation_checks_skips_completed_results_without_force(tmp_path: Pa
 
     assert client.calls == []
     assert run.reports[0].summary == "Existing result."
+
+
+def test_force_rerun_stamps_selected_model_on_saved_study_report(tmp_path: Path) -> None:
+    state_dir = tmp_path / ".watson"
+    state_dir.mkdir()
+    study_map = make_study_map(tmp_path)
+    guide = load_deviation_guide(Path("watson-deviation-guide.yaml"))
+    result_path = study_result_path(state_dir / DEVIATION_RESULTS_DIRNAME, study_map.studies[0])
+    result_path.parent.mkdir()
+    result_path.write_text(
+        StudyDeviationReport(
+            study_id="study-1",
+            study_label="Study 1",
+            article_file_path="article.pdf",
+            preregistration_file_path="prereg.pdf",
+            status="completed",
+            model="old-model",
+            summary="Existing result.",
+        ).model_dump_json(indent=2)
+        + "\n",
+        encoding="utf-8",
+    )
+    client = FakeStaleModelDeviationClient()
+
+    run = run_deviation_checks(
+        root=tmp_path,
+        state_dir=state_dir,
+        study_map=study_map,
+        guide=guide,
+        guide_path=Path("watson-deviation-guide.yaml"),
+        client=client,
+        model="new-model",
+        force=True,
+    )
+
+    saved_report = load_study_report(result_path)
+
+    assert client.calls == ["study-1"]
+    assert run.model == "new-model"
+    assert run.reports[0].model == "new-model"
+    assert saved_report.model == "new-model"
 
 
 def test_validate_report_deviation_types_adds_review_note() -> None:

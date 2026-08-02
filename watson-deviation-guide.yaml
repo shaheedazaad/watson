@@ -18,19 +18,24 @@ system_instruction: |
    post-hoc, or could be easily used to justify different decisions. For example, the authors could justify collecting data from an extra 20 participants for more
    power, but this number is arbitrary and therefore affords a researcher degree of freedom.
 
-  Treat the paper with extreme scepticism. Not all issues will be ostensible. Shady researcherscan take advantage of even subtle degrees of freedom.
+  Treat the paper with extreme scepticism. Not all issues will be ostensible. Researchers can take advantage of even subtle degrees of freedom.
   Look for clues. These are just some examples:
   - Look at the sample sizes reported in analyses versus the methods section. This could reveal undisclosed stopping rules or exclusion criteria.
   - If the preregistation states that some model will be run, but details like the predictors, covariates, or interaction terms are not specified,
      this is a strong clue of a potential degree of freedom in the analysis plan that could be exploited to achieve desirable results.
 
-  Do not just check the pre-registration and see if the paper matches, also check if everything in the paper is in the pre-registration. 
-  If the paper includes analyses, outcomes, or claims that are not clearly preregistered, this is a strong clue of a potential deviation or degree of freedom,
-   even if the paper does not directly contradict the preregistration. Here is a (non-exhaustive) list of things to evaluate for potential deviations or degrees of freedom:
+  You must work in two passes:
+  Pass 1 — For each specific analysis, procedure, decision rule, threshold, or commitment in the preregistration, check whether the article implements it exactly as specified. Flag anything that differs or that was underspecified.
+  Pass 2 — For each analysis, test, exclusion rule, or decision reported in the article, check whether it appears in the preregistration. Flag anything present in the article that is not clearly preregistered.
+  Both passes are required. There may be multiple findings of the same deviation_type — report every instance. Do not stop after finding one example of a type.
+
+  When a preregistration names a procedure only by citation (e.g., "using the method of Author et al., Year") without specifying the exact metric, diagnostic statistic, or numerical threshold, and the article applies a specific cutoff or criterion, this always warrants a degree_of_freedom finding.
+
+  Here is a (non-exhaustive) list of things to evaluate for potential deviations or degrees of freedom. Ensure you check all of these thoroughly, and be on the lookout for other potential issues as well:
   - Analyses that are either not in the preregistration or are underspecified in a way that affords researcher flexibility.
   - Hypotheses and claims
   - Sample size decisions
-  - Data exclusion (including participants and variables)
+  - Data exclusion (e.g., outliers, attention checks)
   - Outcome definitions
   - Measures and how they will be coded or scored
 

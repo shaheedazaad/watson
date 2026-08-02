@@ -5,19 +5,16 @@ from watson.schemas import FileRecord
 
 SUPPORTED_FILE_MIME_TYPES: dict[str, tuple[str, ...]] = {
     ".pdf": ("application/pdf",),
-    ".docx": (
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/zip",
-    ),
     ".txt": ("text/plain",),
-    ".md": ("text/markdown", "text/plain"),
     ".csv": ("text/csv", "application/csv", "text/plain"),
-    ".tsv": ("text/tab-separated-values", "text/plain"),
     ".html": ("text/html", "application/xhtml+xml"),
     ".htm": ("text/html", "application/xhtml+xml"),
+    ".xml": ("text/xml", "application/xml"),
+    ".json": ("application/json", "text/json", "text/plain"),
+    ".rtf": ("text/rtf", "application/rtf", "text/plain"),
 }
 
-TEXT_LIKE_EXTENSIONS = {".txt", ".md", ".csv", ".tsv", ".html", ".htm"}
+TEXT_LIKE_EXTENSIONS = {".txt", ".csv", ".html", ".htm", ".xml", ".json", ".rtf"}
 
 
 def supported_extensions() -> set[str]:
@@ -25,7 +22,7 @@ def supported_extensions() -> set[str]:
 
 
 def supported_file_types_label() -> str:
-    return "Supported file types: PDF, DOCX, TXT, MD, CSV, TSV, HTML/HTM."
+    return "Supported file types: PDF, TXT, CSV, HTML/HTM, XML, JSON, RTF."
 
 
 def is_supported_file(record: FileRecord) -> bool:

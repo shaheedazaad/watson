@@ -58,7 +58,14 @@ def save_upload_cache(path: Path, cache: dict[str, GeminiFileRecord]) -> None:
     )
 
 
-def run_inventory(root: Path, state_dir: Path, client: ResearchClient, model: str = DEFAULT_MODEL) -> InventoryResult:
+def run_inventory(
+    root: Path,
+    state_dir: Path,
+    client: ResearchClient,
+    model: str = DEFAULT_MODEL,
+    progress=None,
+    cancelled=None,
+) -> InventoryResult:
     files = scan_files(root)
     supported_files = [file_record for file_record in files if is_supported_file(file_record)]
     unsupported_files = [file_record for file_record in files if not is_supported_file(file_record)]
@@ -73,7 +80,11 @@ def run_inventory(root: Path, state_dir: Path, client: ResearchClient, model: st
     if not supported_files:
         notes.append(f"No supported files were found. {supported_file_types_label()}")
 
-    for file_record in supported_files:
+    for index, file_record in enumerate(supported_files, start=1):
+        if cancelled and cancelled():
+            raise InterruptedError("Processing was cancelled.")
+        if progress:
+            progress(f"Classifying {file_record.path} ({index}/{len(supported_files)})")
         try:
             classification = client.classify_document(root, file_record)
         except Exception as exc:
@@ -85,6 +96,10 @@ def run_inventory(root: Path, state_dir: Path, client: ResearchClient, model: st
     studies = []
     matches = []
     if article:
+        if cancelled and cancelled():
+            raise InterruptedError("Processing was cancelled.")
+        if progress:
+            progress(f"Extracting studies from {article.file_path}")
         study_result = client.extract_studies(root, article)
         studies = study_result.studies
         if not studies:
@@ -98,6 +113,10 @@ def run_inventory(root: Path, state_dir: Path, client: ResearchClient, model: st
     for study in studies:
         if study.article_says_preregistered is False:
             continue
+        if cancelled and cancelled():
+            raise InterruptedError("Processing was cancelled.")
+        if progress:
+            progress(f"Matching preregistration for {study.label}")
         try:
             matches.append(client.match_preregistrations(root, study, preregistrations))
         except Exception as exc:

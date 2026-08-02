@@ -28,7 +28,7 @@ from watson.text_extractors import extract_text
 
 DEFAULT_MODEL = "gemini-3.1-pro-preview"
 UPLOAD_EXTENSIONS = supported_extensions()
-DEFAULT_TEMPERATURE = 0.0
+DEFAULT_TEMPERATURE = 0.7
 THINKING_LEVEL_OPTIONS = ("minimal", "low", "medium", "high")
 DEFAULT_THINKING_LEVEL = "high"
 
@@ -60,6 +60,13 @@ class GeminiResearchClient:
         self._types = types
         self._client = genai.Client(api_key=api_key)
         self.upload_cache = upload_cache or {}
+        self._deviation_checklist_cache: dict[str, str] = {}
+        self.usage = {
+            "requests": 0,
+            "prompt_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        }
 
     def validate_key(self) -> None:
         try:
@@ -160,13 +167,32 @@ when no candidate fits, and "needs_review" when evidence is too weak.
 
         article_record = self._record_for_existing_path(root, study.article_file_path)
         prereg_record = self._record_for_existing_path(root, study.matched_preregistration_file_path)
-        prompt = build_deviation_prompt(guide, study)
+        checklist = self._prepare_deviation_checklist(root, guide, study, prereg_record)
+        prompt = build_deviation_prompt(guide, study, checklist)
         contents: list[Any] = [
             self._upload_file(root / study.article_file_path, article_record),
             self._upload_file(root / study.matched_preregistration_file_path, prereg_record),
             prompt,
         ]
         return self._generate_json(contents, StudyDeviationReport)
+
+    def _prepare_deviation_checklist(
+        self,
+        root: Path,
+        guide: DeviationGuide,
+        study: StudyMapEntry,
+        prereg_record: FileRecord,
+    ) -> str:
+        cache_key = f"{guide.model_dump_json()}::{study.study_id}"
+        cached = self._deviation_checklist_cache.get(cache_key)
+        if cached:
+            return cached
+
+        prompt = build_deviation_checklist_prompt(guide, study)
+        prereg_file = self._upload_file(root / study.matched_preregistration_file_path, prereg_record)
+        checklist = self._generate_text([prereg_file, prompt]).strip()
+        self._deviation_checklist_cache[cache_key] = checklist
+        return checklist
 
     def _generate_for_file(
         self,
@@ -232,14 +258,11 @@ when no candidate fits, and "needs_review" when evidence is too weak.
 
     def _generate_json(self, contents: Any, schema: type[T]) -> T:
         try:
-            thinking_config = self._types.ThinkingConfig(
-                thinkingLevel=getattr(self._types.ThinkingLevel, self.thinking_level.upper()),
-            )
             config = self._types.GenerateContentConfig(
                 responseMimeType="application/json",
                 responseSchema=schema,
                 temperature=DEFAULT_TEMPERATURE,
-                thinkingConfig=thinking_config,
+                thinkingConfig=self._thinking_config(),
             )
             response = self._client.models.generate_content(
                 model=self.model,
@@ -261,6 +284,7 @@ when no candidate fits, and "needs_review" when evidence is too weak.
             raise GeminiError(f"Gemini request failed: {exc}") from exc
 
         text = getattr(response, "text", "") or ""
+        self._record_usage(response)
         try:
             return schema.model_validate_json(text)
         except ValidationError as exc:
@@ -268,6 +292,54 @@ when no candidate fits, and "needs_review" when evidence is too weak.
                 return schema.model_validate(json.loads(text))
             except Exception as json_exc:
                 raise GeminiError(f"Gemini returned invalid structured output: {json_exc}") from exc
+
+    def _generate_text(self, contents: Any) -> str:
+        try:
+            config = self._types.GenerateContentConfig(
+                temperature=DEFAULT_TEMPERATURE,
+                thinkingConfig=self._thinking_config(),
+            )
+            response = self._client.models.generate_content(
+                model=self.model,
+                contents=contents,
+                config=config,
+            )
+        except TypeError:
+            response = self._client.models.generate_content(
+                model=self.model,
+                contents=contents,
+                config={
+                    "temperature": DEFAULT_TEMPERATURE,
+                    "thinking_config": {"thinking_level": self.thinking_level},
+                },
+            )
+        except Exception as exc:
+            raise GeminiError(f"Gemini request failed: {exc}") from exc
+
+        text = getattr(response, "text", "") or ""
+        self._record_usage(response)
+        if not text.strip():
+            raise GeminiError("Gemini returned an empty checklist response.")
+        return text
+
+    def _thinking_config(self):
+        return self._types.ThinkingConfig(
+            thinkingLevel=getattr(self._types.ThinkingLevel, self.thinking_level.upper()),
+        )
+
+    def _record_usage(self, response: Any) -> None:
+        metadata = getattr(response, "usage_metadata", None)
+        self.usage["requests"] += 1
+        if metadata is None:
+            return
+        for target, source in (
+            ("prompt_tokens", "prompt_token_count"),
+            ("output_tokens", "candidates_token_count"),
+            ("total_tokens", "total_token_count"),
+        ):
+            value = getattr(metadata, source, 0) or 0
+            if isinstance(value, int) and value >= 0:
+                self.usage[target] += value
 
 
 def fallback_classification(file_record: FileRecord, reason: str) -> DocumentClassification:
@@ -288,15 +360,57 @@ def normalize_thinking_level(value: str) -> str:
     return normalized
 
 
-def build_deviation_prompt(guide: DeviationGuide, study: StudyMapEntry) -> str:
+def build_deviation_checklist_prompt(
+    guide: DeviationGuide,
+    study: StudyMapEntry | None = None,
+) -> str:
+    target = ""
+    if study is not None:
+        target = f"""
+Target study metadata:
+{study.model_dump_json(indent=2)}
+"""
     return f"""
 {build_deviation_system_prompt(guide)}
+
+{target}
+
+convert this guide into a concise audit checklist, including checks for outliers,
+analysis specifications, thresholds, and every other category in the guide.
+When a target study and preregistration are attached, make each item concrete and
+document-derived. Return only the checklist. Do not evaluate a study yet.
+"""
+
+
+def build_deviation_prompt(
+    guide: DeviationGuide,
+    study: StudyMapEntry,
+    checklist: str = "",
+) -> str:
+    checklist_section = ""
+    if checklist.strip():
+        checklist_section = f"""
+Internal checklist prepared from the guide:
+{checklist.strip()}
+"""
+    return f"""
+{build_deviation_system_prompt(guide)}
+
+{checklist_section}
 
 Target study metadata:
 {study.model_dump_json(indent=2)}
 
 Evaluate the attached article and preregistration for this target study only.
+
+Work in two passes:
+Pass 1 — For each item in the preregistration, verify whether the article implements it as specified. Flag any that differ or that the preregistration left underspecified.
+Pass 2 — For each analysis, test, exclusion rule, or decision reported in the article, verify whether it appears in the preregistration. Flag anything in the article that is not clearly preregistered.
+
+Both passes are required. There may be multiple findings of the same deviation_type — report every instance you find. Do not stop after identifying one example of a type.
+
 Return JSON matching the requested schema, using only deviation_type values from
 the guide. Set study_id, study_label, article_file_path, and
 preregistration_file_path exactly as provided in the target study metadata.
+Set apa_citation to the full APA 7th edition citation for the article.
 """

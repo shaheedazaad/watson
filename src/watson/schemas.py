@@ -141,6 +141,7 @@ class StudyDeviationReport(BaseModel):
     study_label: str
     article_file_path: str
     preregistration_file_path: str | None = None
+    apa_citation: str = ""
     status: str = "completed"
     generated_at: datetime | None = None
     model: str = ""

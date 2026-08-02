@@ -66,12 +66,15 @@ def run_deviation_checks(
     model: str,
     force: bool = False,
     progress=None,
+    cancelled=None,
 ) -> DeviationCheckRun:
     results_dir = state_dir / DEVIATION_RESULTS_DIRNAME
     reports: list[StudyDeviationReport] = []
     studies_to_check = ready_studies(study_map)
 
     for index, study in enumerate(studies_to_check, start=1):
+        if cancelled and cancelled():
+            raise InterruptedError("Processing was cancelled.")
         result_path = study_result_path(results_dir, study)
         if result_path.exists() and not force:
             report = load_study_report(result_path)
@@ -89,7 +92,7 @@ def run_deviation_checks(
             report = client.check_preregistration_adherence(root, study, guide)
             report.status = "completed"
             report.generated_at = report.generated_at or datetime.now(tz=timezone.utc)
-            report.model = report.model or model
+            report.model = model
             validate_report_deviation_types(report, guide)
             validate_report_consistency(report)
         except Exception as exc:
@@ -204,14 +207,15 @@ def render_report_warning() -> str:
 
 
 def render_study_report(report: StudyDeviationReport) -> list[str]:
-    lines = [
-        f"### {report.study_label}",
-        "",
+    lines = [f"### {report.study_label}", ""]
+    if report.apa_citation:
+        lines.extend([f"> {report.apa_citation}", ""])
+    lines.extend([
         f"- Article: `{report.article_file_path}`",
         f"- Preregistration: `{report.preregistration_file_path or ''}`",
         f"- Status: `{report.status}`",
         "",
-    ]
+    ])
 
     if has_real_error(report.error):
         lines.extend([f"Error: {report.error}", ""])
@@ -240,14 +244,16 @@ def render_study_report(report: StudyDeviationReport) -> list[str]:
 
     lines.extend(
         [
-            "| Type | Confidence | Summary |",
-            "| --- | --- | --- |",
+            "<!-- Legacy column set: | Type | Confidence | Summary | -->",
+            "| Type | Confidence | Disclosed | Summary |",
+            "| --- | --- | --- | --- |",
         ]
     )
     for finding in report.deviations:
         lines.append(
             f"| {escape_table(markdown_escape(finding.deviation_type))} | "
-            f"{escape_table(finding.confidence)} | {escape_table(finding.summary)} |"
+            f"{escape_table(finding.confidence)} | "
+            f"{escape_table(finding.disclosed)} | {escape_table(finding.summary)} |"
         )
     lines.append("")
 

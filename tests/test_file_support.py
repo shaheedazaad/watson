@@ -23,5 +23,21 @@ def test_supported_file_types_label_lists_supported_formats() -> None:
     label = supported_file_types_label()
 
     assert "PDF" in label
-    assert "DOCX" in label
     assert "HTML/HTM" in label
+    assert "XML" in label
+    assert "JSON" in label
+    assert "RTF" in label
+    assert "DOCX" not in label
+
+
+def test_docx_is_not_supported() -> None:
+    record = FileRecord(
+        path="article.docx",
+        extension=".docx",
+        mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        size_bytes=1,
+        modified_at=datetime.now(tz=timezone.utc),
+        sha256="abc",
+    )
+
+    assert is_supported_file(record) is False
