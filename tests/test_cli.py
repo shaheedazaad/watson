@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from click import unstyle
 from typer.testing import CliRunner
 
 import watson.cli as cli_module
@@ -42,7 +43,7 @@ def test_headless_run_does_not_read_keychain_without_explicit_flag(
     result = CliRunner().invoke(app, ["run", project.id, "--data-dir", str(tmp_path)])
 
     assert result.exit_code != 0
-    assert "--use-keychain" in result.output
+    assert "--use-keychain" in unstyle(result.output)
 
 
 def test_headless_run_reads_keychain_with_explicit_flag(
