@@ -9,7 +9,7 @@ from pathlib import Path
 
 import typer
 
-from watson.config import ConfigStore
+from watson.config import ConfigStore, CredentialStoreError, system_credential_store_name
 from watson.deviation_guide import (
     DEFAULT_DEVIATION_GUIDE_PATH,
     DeviationGuideError,
@@ -51,15 +51,28 @@ def run_headless(
     action: str = typer.Option("all", "--action", help="inventory, deviation, or all."),
     retry_all: bool = typer.Option(False, "--retry-all", help="Rerun completed work too."),
     api_key_env: str = typer.Option("GEMINI_API_KEY", "--api-key-env", help="Environment variable containing the API key."),
+    use_keychain: bool = typer.Option(
+        False,
+        "--use-keychain",
+        help="Explicitly load the saved API key from the operating-system credential store.",
+    ),
     data_dir: Path | None = typer.Option(None, "--data-dir", help="Override Watson's application-data directory."),
 ) -> None:
     """Run the same processing pipeline noninteractively for a managed project."""
     store = ProjectStore(data_dir)
     paths = store.paths(project_id)
     saved = store.get_settings(project_id)
-    api_key = os.environ.get(api_key_env) or ConfigStore(store.data_dir).get_api_key()
+    api_key = os.environ.get(api_key_env)
+    if not api_key and use_keychain:
+        try:
+            api_key = ConfigStore(store.data_dir).load_api_key_from_keychain()
+        except CredentialStoreError as exc:
+            raise typer.BadParameter(str(exc)) from exc
     if not api_key:
-        raise typer.BadParameter(f"No API key found in {api_key_env} or the operating-system credential store.")
+        raise typer.BadParameter(
+            f"No API key found in {api_key_env}. Pass --use-keychain to explicitly read "
+            f"{system_credential_store_name()}."
+        )
     settings = RunnerSettings(
         action=action,
         model=saved.model,

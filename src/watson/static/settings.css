@@ -1,0 +1,11 @@
+.action-note {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.settings-form form + form {
+  margin-top: 14px;
+}

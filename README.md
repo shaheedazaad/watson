@@ -30,11 +30,11 @@ In the browser:
 
 1. Create a named project.
 2. Add the article, preregistration, and relevant supplemental files.
-3. Open project settings to add the Gemini API key and optional document context.
+3. Open project settings to save the Gemini API key in the operating-system credential store and load it for the current Watson session.
 4. Start processing and follow live progress.
 5. Read the inventory and preregistration reports in the browser, expand individual studies to inspect every finding, or download reports and machine-readable data.
 
-Projects live in the normal per-user application-data directory. The browser workflow never requires editing that directory. API keys are encrypted in Watson's application-data vault with user-only filesystem permissions, so Watson does not trigger operating-system Keychain prompts. Someone with full access to the operating-system account can still access the local vault. If the vault cannot be written, Watson keeps the key only in memory and shows a warning.
+Projects live in the normal per-user application-data directory. The browser workflow never requires editing that directory. API keys are stored in macOS Keychain, Windows Credential Manager, or Linux Secret Service. Watson selects these native stores directly, so keyring configuration cannot redirect the key to a plaintext backend. Watson never reads the credential store during launch, page loads, updates, or processing. The user must explicitly save or load the key in project settings; after an update, the same explicit load action reconnects the saved key and makes any operating-system permission prompt expected. Once loaded, the key remains only in process memory until Watson closes. Credentials are never included in project files or exports.
 
 Supported inputs are PDF, TXT, CSV, HTML/HTM, XML, JSON, and RTF. Each file is limited to 50 MB and each upload request to 200 MB.
 
@@ -45,6 +45,8 @@ The noninteractive command calls the same runner as the browser app:
 ```sh
 watson projects list
 GEMINI_API_KEY=... watson run PROJECT_ID --action all
+# Or explicitly permit this command to read the saved system credential:
+watson run PROJECT_ID --action all --use-keychain
 ```
 
 By default, a rerun processes only missing or failed work. Use `--retry-all` for a complete rerun. Each successful run writes `reproducibility.json` with the effective model, thinking level, seed, concurrency, platform, and relevant package versions. Result archives include source documents, machine-readable results, reports, and this metadata; credentials and Gemini upload-cache identifiers are excluded.

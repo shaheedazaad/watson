@@ -1,14 +1,94 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
+import watson.config as config_module
 from watson.web import create_app
 
 
 TOKEN = "test-session-token"
+
+
+def test_navigation_never_accesses_system_credentials(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        config_module,
+        "_credential_backend",
+        lambda: (_ for _ in ()).throw(AssertionError("unexpected Keychain access")),
+    )
+    app = create_app(token=TOKEN, data_dir=tmp_path)
+    project = app.state.project_store.create("No implicit credential access")
+    app.state.project_store.add_stream(project.id, "article.txt", BytesIO(b"article"))
+
+    with TestClient(app) as client:
+        responses = [
+            client.get(f"/{TOKEN}/", headers={"host": "127.0.0.1"}),
+            client.get(f"/{TOKEN}/projects/{project.id}", headers={"host": "127.0.0.1"}),
+            client.get(
+                f"/{TOKEN}/projects/{project.id}/settings",
+                headers={"host": "127.0.0.1"},
+            ),
+        ]
+        run_attempt = client.post(
+            f"/{TOKEN}/projects/{project.id}/runs",
+            data={"action": "all", "retry_mode": "failed"},
+            headers={"host": "127.0.0.1"},
+            follow_redirects=False,
+        )
+
+    assert all(response.status_code == 200 for response in responses)
+    assert run_attempt.status_code == 303
+    assert "Explicitly" in run_attempt.headers["location"]
+    assert "never accesses" in responses[-1].text
+
+
+def test_keychain_read_requires_explicit_load_action(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    class Backend:
+        def get_password(self, service: str, username: str) -> str:
+            calls.append("get")
+            return "explicit-secret"
+
+        def set_password(self, service: str, username: str, password: str) -> None:
+            calls.append("set")
+
+        def delete_password(self, service: str, username: str) -> None:
+            calls.append("delete")
+
+    monkeypatch.setattr(config_module, "_credential_backend", lambda: Backend())
+    app = create_app(token=TOKEN, data_dir=tmp_path)
+    project = app.state.project_store.create("Explicit credential access")
+    app.state.config.write_config({"gemini_api_key_storage": "keychain"})
+
+    with TestClient(app) as client:
+        settings = client.get(
+            f"/{TOKEN}/projects/{project.id}/settings",
+            headers={"host": "127.0.0.1"},
+        )
+        assert calls == []
+        loaded = client.post(
+            f"/{TOKEN}/credentials/load",
+            data={"project_id": project.id},
+            headers={"host": "127.0.0.1"},
+            follow_redirects=False,
+        )
+
+    assert settings.status_code == 200
+    assert "Load from" in settings.text
+    assert loaded.status_code == 303
+    assert calls == ["get"]
+    assert app.state.config.get_session_api_key() == "explicit-secret"
 
 
 def test_routes_require_session_token_and_safe_host(tmp_path: Path) -> None:

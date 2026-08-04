@@ -45,7 +45,7 @@
 </section>
 {% else %}
 <section class="run-panel">
-  <div class="run-copy"><p class="eyebrow">Processing</p><h2>Run Watson</h2><p>Retries continue missing or failed work. A complete rerun replaces completed study checks.</p></div>
+  <div class="run-copy"><p class="eyebrow">Processing</p><h2>Run Watson</h2><p>{% if credential_loaded %}Retries continue missing or failed work. A complete rerun replaces completed study checks.{% else %}Watson has not loaded an API key for this session. <a href="{{ url('projects/' + project.id + '/settings') }}">Explicitly load it in Settings</a>; this page will never access the system credential store.{% endif %}</p></div>
   <form class="run-controls" action="{{ url('projects/' + project.id + '/runs') }}" method="post">
     <select name="action" aria-label="Processing step">
       <option value="all">Inventory + preregistration check</option>
@@ -56,7 +56,7 @@
       <option value="failed">Continue failed or missing work</option>
       <option value="all">Complete rerun</option>
     </select>
-    <button class="primary" type="submit" {% if not inputs %}disabled{% endif %}>Start processing</button>
+    <button class="primary" type="submit" {% if not inputs or not credential_loaded %}disabled{% endif %}>Start processing</button>
   </form>
 </section>
 {% endif %}

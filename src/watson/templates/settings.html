@@ -2,7 +2,7 @@
 {% block title %}Settings · {{ project.name }} · Watson{% endblock %}
 {% block content %}
 <nav class="breadcrumbs"><a href="{{ url() }}">Projects</a><span>/</span><a href="{{ url('projects/' + project.id) }}">{{ project.name }}</a><span>/</span><span>Settings</span></nav>
-<div class="page-heading"><div><p class="eyebrow">Project configuration</p><h1>Settings</h1><p class="lede">Settings here apply only to {{ project.name }}.</p></div></div>
+<div class="page-heading"><div><p class="eyebrow">Project configuration</p><h1>Settings</h1><p class="lede">Processing settings apply only to {{ project.name }}. The Gemini credential is shared by your local Watson projects.</p></div></div>
 {% if notice %}<div class="flash success" role="status">{{ notice }}</div>{% endif %}
 {% if error %}<div class="flash error" role="alert">{{ error }}</div>{% endif %}
 
@@ -23,16 +23,51 @@
   </form>
 
   <div>
-    <details class="section-card settings-form" {% if credential_storage == 'none' %}open{% endif %}>
-      <summary>Gemini credential <span class="status {{ 'complete' if credential_storage != 'none' else 'failed' }}">{{ 'encrypted app vault' if credential_storage == 'app_vault' else credential_storage }}</span></summary>
-      <p class="muted">The key is encrypted in Watson's application-data folder and protected with user-only file permissions. It is never written to project files, URLs, logs, reports, or exports. Anyone with full access to your operating-system account can still access the local vault.</p>
-      {% if credential_storage == 'session' %}<div class="flash warning">The encrypted app vault was unavailable. The current key exists only in memory and disappears when Watson closes.</div>{% endif %}
+    <details class="section-card settings-form" open>
+      <summary>Gemini credential
+        {% if credential_state.session_loaded %}<span class="status complete">ready this session</span>
+        {% elif credential_state.has_legacy_key %}<span class="status running">migration available</span>
+        {% elif credential_state.has_saved_key %}<span class="status running">not loaded</span>
+        {% else %}<span class="status failed">not configured</span>{% endif %}
+      </summary>
+      <p class="muted">Watson never accesses {{ credential_store_name }} during launch, page loads, updates, or processing. Only the clearly labelled actions below can read, write, or delete the saved key. The key is held in memory after an explicit save or load and disappears when Watson closes.</p>
+
+      {% if credential_state.has_legacy_key %}
+      <div class="flash warning">An API key from an earlier Watson version is still in the old local file vault. Watson will not load it into the session or migrate it automatically.</div>
+      <form action="{{ url('credentials/migrate') }}" method="post">
+        <input type="hidden" name="project_id" value="{{ project.id }}">
+        <button class="primary" type="submit">Move old key to {{ credential_store_name }}</button>
+        <p class="action-note">Explicit action: reads the old vault, writes {{ credential_store_name }}, then removes the old vault. Your operating system may ask you to approve access.</p>
+      </form>
+      <form action="{{ url('credentials/delete-legacy') }}" method="post">
+        <input type="hidden" name="project_id" value="{{ project.id }}">
+        <button class="danger-text" type="submit">Delete old file-vault key</button>
+      </form>
+      {% endif %}
+
+      {% if credential_state.has_saved_key and not credential_state.session_loaded %}
+      <div class="flash warning">A key is recorded as saved, but Watson has not accessed it in this session. After an update, use this explicit reconnect step; your operating system may ask you to approve access again.</div>
+      <form action="{{ url('credentials/load') }}" method="post">
+        <input type="hidden" name="project_id" value="{{ project.id }}">
+        <button class="primary" type="submit">Load from {{ credential_store_name }} for this session</button>
+        <p class="action-note">Explicit credential-store read: this is the only action that loads an already-saved key.</p>
+      </form>
+      {% elif credential_state.session_loaded %}
+      <div class="flash success">The API key is available in memory for this Watson session.</div>
+      <form action="{{ url('credentials/forget') }}" method="post">
+        <input type="hidden" name="project_id" value="{{ project.id }}">
+        <button class="quiet" type="submit">Remove key from this session</button>
+        <p class="action-note">Does not access or delete the saved Keychain item.</p>
+      </form>
+      {% endif %}
+
       <form action="{{ url('credentials') }}" method="post">
         <input type="hidden" name="project_id" value="{{ project.id }}">
-        <label>Gemini API key <input type="password" name="api_key" autocomplete="off" placeholder="Paste a new key" required></label>
-        <button class="primary" type="submit">Save API key</button>
+        <label>{% if credential_state.has_saved_key %}Replace{% else %}Add{% endif %} Gemini API key <input type="password" name="api_key" autocomplete="off" placeholder="Paste a new key" required></label>
+        <button class="primary" type="submit">Save to {{ credential_store_name }}</button>
+        <p class="action-note">Explicit credential-store write: saving also loads the new key into this session. Your operating system may ask you to approve access.</p>
       </form>
-      {% if credential_storage != 'none' %}<form action="{{ url('credentials/delete') }}" method="post"><input type="hidden" name="project_id" value="{{ project.id }}"><button class="danger-text" type="submit">Delete saved key</button></form>{% endif %}
+      {% if credential_state.has_saved_key %}<form action="{{ url('credentials/delete') }}" method="post"><input type="hidden" name="project_id" value="{{ project.id }}"><button class="danger-text" type="submit">Delete from {{ credential_store_name }}</button><p class="action-note">Explicit credential-store delete; your operating system may ask you to approve access.</p></form>{% endif %}
     </details>
   </div>
 </div>

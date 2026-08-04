@@ -4,14 +4,18 @@ import json
 import os
 import secrets
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from cryptography.fernet import Fernet, InvalidToken
 from typer import prompt
 
 
 SERVICE_NAME = "watson"
+# This becomes the human-visible item name in macOS permission dialogs.
+KEYCHAIN_SERVICE_NAME = "Watson Gemini API"
+KEYCHAIN_ACCOUNT_NAME = "API key"
 CONFIG_FILENAME = "config.json"
 VAULT_FILENAME = "credentials.vault"
 VAULT_KEY_FILENAME = ".credential-key"
@@ -19,6 +23,32 @@ APP_CONFIG_DIR_ENV = "WATSON_CONFIG_DIR"
 DEFAULT_THINKING_LEVEL = "high"
 THINKING_LEVEL_OPTIONS = ("minimal", "low", "medium", "high")
 _SESSION_SECRETS: dict[str, str] = {}
+
+
+class CredentialStoreError(RuntimeError):
+    """A user-initiated system credential-store operation failed."""
+
+
+class _CredentialBackend(Protocol):
+    def get_password(self, service: str, username: str) -> str | None: ...
+
+    def set_password(self, service: str, username: str, password: str) -> None: ...
+
+    def delete_password(self, service: str, username: str) -> None: ...
+
+
+@dataclass(frozen=True)
+class CredentialState:
+    persistent: str
+    session_loaded: bool
+
+    @property
+    def has_saved_key(self) -> bool:
+        return self.persistent == "keychain"
+
+    @property
+    def has_legacy_key(self) -> bool:
+        return self.persistent == "legacy_vault"
 
 
 def get_app_state_dir() -> Path:
@@ -34,6 +64,14 @@ def get_app_state_dir() -> Path:
     if xdg_config_home:
         return (Path(xdg_config_home).expanduser() / SERVICE_NAME).resolve()
     return (Path.home() / ".config" / SERVICE_NAME).resolve()
+
+
+def system_credential_store_name() -> str:
+    if sys.platform == "darwin":
+        return "macOS Keychain"
+    if os.name == "nt":
+        return "Windows Credential Manager"
+    return "Secret Service keyring"
 
 
 class ConfigStore:
@@ -52,18 +90,13 @@ class ConfigStore:
             pass
 
     def read_config(self) -> dict[str, Any]:
+        """Read non-secret metadata without accessing the system credential store."""
         if not self.config_path.exists():
             return {}
         try:
-            config = json.loads(self.config_path.read_text(encoding="utf-8"))
+            return json.loads(self.config_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return {}
-        legacy_secret = config.pop("gemini_api_key", None)
-        if isinstance(legacy_secret, str) and legacy_secret:
-            storage = self._save_to_vault_or_session(legacy_secret)
-            config["gemini_api_key_storage"] = storage
-            self.write_config(config)
-        return config
 
     def write_config(self, config: dict[str, Any]) -> None:
         self.ensure_state_dir()
@@ -72,51 +105,106 @@ class ConfigStore:
             (json.dumps(config, indent=2, sort_keys=True) + "\n").encode("utf-8"),
         )
 
-    def get_api_key(self) -> str | None:
-        key = self._read_vault()
-        if key:
-            return key
-        self.read_config()  # Migrates plaintext credentials from early development builds.
-        return self._read_vault() or _SESSION_SECRETS.get(self._session_key())
+    def get_credential_state(self) -> CredentialState:
+        """Return local metadata only; this method never queries the Keychain."""
+        config = self.read_config()
+        storage = config.get("gemini_api_key_storage")
+        if storage == "keychain":
+            persistent = "keychain"
+        elif self._legacy_credential_available(config):
+            persistent = "legacy_vault"
+        else:
+            persistent = "none"
+        return CredentialState(
+            persistent=persistent,
+            session_loaded=self.get_session_api_key() is not None,
+        )
 
-    def has_api_key(self) -> bool:
-        return self.get_api_key() is not None
+    def get_session_api_key(self) -> str | None:
+        """Read only the process-memory copy; never access the Keychain."""
+        return _SESSION_SECRETS.get(self._session_key())
 
-    def get_api_key_storage(self) -> str:
-        if self._read_vault():
-            return "app_vault"
-        self.read_config()
-        if self._read_vault():
-            return "app_vault"
-        if _SESSION_SECRETS.get(self._session_key()):
-            return "session"
-        return "none"
-
-    def prompt_for_api_key(self) -> str:
-        return prompt("Enter Gemini API key", hide_input=True).strip()
-
-    def save_api_key(self, api_key: str) -> str:
+    def save_api_key_to_keychain(self, api_key: str) -> None:
+        """Persist a key after an explicit user save action and cache it for this run."""
         api_key = api_key.strip()
         if not api_key:
             raise ValueError("API key cannot be empty.")
+        try:
+            _credential_backend().set_password(
+                KEYCHAIN_SERVICE_NAME,
+                KEYCHAIN_ACCOUNT_NAME,
+                api_key,
+            )
+        except Exception as exc:
+            raise CredentialStoreError(
+                f"{system_credential_store_name()} could not save the API key: {exc}"
+            ) from exc
         config = self.read_config()
         config.pop("gemini_api_key", None)
-        storage = self._save_to_vault_or_session(api_key)
-        config["gemini_api_key_storage"] = storage
+        config["gemini_api_key_storage"] = "keychain"
         self.write_config(config)
-        return storage
+        self._remove_legacy_vault()
+        _SESSION_SECRETS[self._session_key()] = api_key
 
-    def delete_api_key(self) -> None:
-        config = self.read_config()
+    def load_api_key_from_keychain(self) -> str:
+        """Load a key only after an explicit user load action."""
+        try:
+            api_key = _credential_backend().get_password(
+                KEYCHAIN_SERVICE_NAME,
+                KEYCHAIN_ACCOUNT_NAME,
+            )
+        except Exception as exc:
+            raise CredentialStoreError(
+                f"{system_credential_store_name()} could not load the API key: {exc}"
+            ) from exc
+        if not api_key:
+            raise CredentialStoreError(
+                f"No Watson API key was found in {system_credential_store_name()}. "
+                "Save it again to reconnect this installation."
+            )
+        _SESSION_SECRETS[self._session_key()] = api_key
+        return api_key
+
+    def forget_session_api_key(self) -> None:
+        """Discard the in-memory key without accessing the Keychain."""
         _SESSION_SECRETS.pop(self._session_key(), None)
-        for path in (self.vault_path, self.vault_key_path):
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
+
+    def delete_api_key_from_keychain(self) -> None:
+        """Delete the persisted key after an explicit user delete action."""
+        try:
+            _credential_backend().delete_password(
+                KEYCHAIN_SERVICE_NAME,
+                KEYCHAIN_ACCOUNT_NAME,
+            )
+        except Exception as exc:
+            # Keyring uses PasswordDeleteError when the item is already absent.
+            if exc.__class__.__name__ != "PasswordDeleteError":
+                raise CredentialStoreError(
+                    f"{system_credential_store_name()} could not delete the API key: {exc}"
+                ) from exc
+        self.forget_session_api_key()
+        self._remove_credential_metadata_and_legacy_files()
+
+    def migrate_legacy_api_key_to_keychain(self) -> None:
+        """Move an old file-vault key after an explicit user migration action."""
+        config = self.read_config()
+        api_key = config.get("gemini_api_key")
+        if not isinstance(api_key, str) or not api_key:
+            api_key = self._read_legacy_vault()
+        if not api_key:
+            raise CredentialStoreError("The legacy credential could not be read. Save the API key again instead.")
+        self.save_api_key_to_keychain(api_key)
+
+    def delete_legacy_api_key(self) -> None:
+        """Remove old file-based credentials without accessing the system store."""
+        config = self.read_config()
         config.pop("gemini_api_key", None)
         config["gemini_api_key_storage"] = "none"
         self.write_config(config)
+        self._remove_legacy_vault()
+
+    def prompt_for_api_key(self) -> str:
+        return prompt("Enter Gemini API key", hide_input=True).strip()
 
     def get_default_model(self, fallback: str) -> str:
         config = self.read_config()
@@ -161,49 +249,64 @@ class ConfigStore:
         config["last_root"] = str(root.resolve())
         self.write_config(config)
 
-    def _save_to_vault_or_session(self, api_key: str) -> str:
-        try:
-            fernet = self._fernet(create=True)
-            encrypted = fernet.encrypt(api_key.encode("utf-8")).decode("ascii")
-            value = {"version": 1, "gemini_api_key": encrypted}
-            _write_private(
-                self.vault_path,
-                (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8"),
-            )
-        except (OSError, ValueError):
-            _SESSION_SECRETS[self._session_key()] = api_key
-            return "session"
-        _SESSION_SECRETS.pop(self._session_key(), None)
-        return "app_vault"
+    def _legacy_credential_available(self, config: dict[str, Any]) -> bool:
+        plaintext = config.get("gemini_api_key")
+        return bool(isinstance(plaintext, str) and plaintext) or (
+            self.vault_path.is_file() and self.vault_key_path.is_file()
+        )
 
-    def _read_vault(self) -> str | None:
-        if not self.vault_path.is_file() or self.vault_path.is_symlink():
+    def _read_legacy_vault(self) -> str | None:
+        if (
+            not self.vault_path.is_file()
+            or self.vault_path.is_symlink()
+            or not self.vault_key_path.is_file()
+            or self.vault_key_path.is_symlink()
+        ):
             return None
         try:
             raw = json.loads(self.vault_path.read_text(encoding="utf-8"))
             encrypted = raw.get("gemini_api_key")
             if not isinstance(encrypted, str) or not encrypted:
                 return None
-            return self._fernet(create=False).decrypt(encrypted.encode("ascii")).decode("utf-8")
+            fernet = Fernet(self.vault_key_path.read_bytes())
+            return fernet.decrypt(encrypted.encode("ascii")).decode("utf-8")
         except (OSError, ValueError, KeyError, json.JSONDecodeError, InvalidToken):
             return None
 
-    def _fernet(self, *, create: bool) -> Fernet:
-        if self.vault_key_path.is_file() and not self.vault_key_path.is_symlink():
+    def _remove_legacy_vault(self) -> None:
+        for path in (self.vault_path, self.vault_key_path):
             try:
-                return Fernet(self.vault_key_path.read_bytes())
-            except (OSError, ValueError):
-                if not create:
-                    raise
-        if not create:
-            raise ValueError("Credential vault key is unavailable.")
-        self.ensure_state_dir()
-        key = Fernet.generate_key()
-        _write_private(self.vault_key_path, key)
-        return Fernet(key)
+                path.unlink()
+            except FileNotFoundError:
+                pass
+
+    def _remove_credential_metadata_and_legacy_files(self) -> None:
+        config = self.read_config()
+        config.pop("gemini_api_key", None)
+        config["gemini_api_key_storage"] = "none"
+        self.write_config(config)
+        self._remove_legacy_vault()
 
     def _session_key(self) -> str:
         return str(self.state_dir)
+
+
+def _credential_backend() -> _CredentialBackend:
+    # Importing lazily makes it impossible for page rendering or app startup to
+    # initialize a credential backend. Only explicit credential actions call here.
+    # Selecting the native backend directly also prevents environment or config
+    # overrides from silently redirecting credentials to an insecure file backend.
+    if sys.platform == "darwin":
+        from keyring.backends.macOS import Keyring
+
+        return Keyring()
+    if os.name == "nt":
+        from keyring.backends.Windows import WinVaultKeyring
+
+        return WinVaultKeyring()
+    from keyring.backends.SecretService import Keyring
+
+    return Keyring()
 
 
 def _write_private(path: Path, value: bytes) -> None:

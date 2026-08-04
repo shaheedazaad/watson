@@ -51,6 +51,7 @@ def assert_runtime_assets() -> list[str]:
         "templates/settings.html",
         "templates/_study_result.html",
         "static/watson.css",
+        "static/settings.css",
         "static/watson.js",
     ]
     package = files("watson")

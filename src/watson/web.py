@@ -20,7 +20,7 @@ from pydantic import ValidationError
 from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile
 
-from watson.config import ConfigStore
+from watson.config import ConfigStore, CredentialStoreError, system_credential_store_name
 from watson.deviation_check import DEVIATION_RUN_FILENAME
 from watson.file_support import supported_file_types_label
 from watson.jobs import ACTIVE_JOB_STATES, JobConflictError, JobManager, JobNotFoundError
@@ -49,6 +49,7 @@ def create_app(
     session_token = token or secrets.token_urlsafe(32)
     project_store = store or ProjectStore(data_dir)
     job_manager = jobs or JobManager(project_store)
+    config_store = ConfigStore(project_store.data_dir)
     templates = Environment(
         loader=FileSystemLoader(str(templates_dir())),
         autoescape=select_autoescape(("html", "xml")),
@@ -62,6 +63,7 @@ def create_app(
     app.state.session_token = session_token
     app.state.project_store = project_store
     app.state.jobs = job_manager
+    app.state.config = config_store
 
     @app.middleware("http")
     async def local_security(request: Request, call_next):
@@ -116,7 +118,7 @@ def create_app(
             page=max(1, page),
             pages=max(1, math.ceil(total / per_page)),
             total=total,
-            credential_storage=ConfigStore(project_store.data_dir).get_api_key_storage(),
+            credential_state=config_store.get_credential_state(),
         )
 
     @app.post(f"/{session_token}/projects")
@@ -135,7 +137,7 @@ def create_app(
                 page=1,
                 pages=max(1, math.ceil(total / 12)),
                 total=total,
-                credential_storage=ConfigStore(project_store.data_dir).get_api_key_storage(),
+                credential_state=config_store.get_credential_state(),
                 error=str(exc),
             )
         return RedirectResponse(url(f"projects/{project.id}"), status_code=303)
@@ -171,7 +173,7 @@ def create_app(
             error=error,
             supported_types=supported_file_types_label(),
             max_file_mb=MAX_FILE_BYTES // (1024 * 1024),
-            credential_storage=ConfigStore(project_store.data_dir).get_api_key_storage(),
+            credential_loaded=config_store.get_credential_state().session_loaded,
         )
 
     @app.get(f"/{session_token}/projects/{{project_id}}/reports/{{kind}}", response_class=HTMLResponse)
@@ -245,14 +247,14 @@ def create_app(
             has_outputs = _has_outputs(project_store.paths(project_id))
         except ProjectNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        config = ConfigStore(project_store.data_dir)
         return render(
             "settings.html",
             request,
             project=project,
             settings=settings,
             has_outputs=has_outputs,
-            credential_storage=config.get_api_key_storage(),
+            credential_state=config_store.get_credential_state(),
+            credential_store_name=system_credential_store_name(),
             notice=notice,
             error=error,
         )
@@ -286,20 +288,86 @@ def create_app(
         try:
             if not api_key:
                 raise ProjectError("Enter an API key.")
-            storage = ConfigStore(project_store.data_dir).save_api_key(api_key)
-            notice = "API key saved in Watson's encrypted app vault."
-            if storage == "session":
-                notice = "The encrypted app vault was unavailable. The API key is available only until Watson closes."
-        except (ProjectError, ValueError) as exc:
+            config_store.save_api_key_to_keychain(api_key)
+            notice = (
+                f"API key saved in {system_credential_store_name()} and loaded for this Watson session."
+            )
+        except (ProjectError, ValueError, CredentialStoreError) as exc:
             return RedirectResponse(url(f"projects/{project_id}/settings?error={_query_value(str(exc))}"), status_code=303)
         return RedirectResponse(url(f"projects/{project_id}/settings?notice={_query_value(notice)}"), status_code=303)
+
+    @app.post(f"/{session_token}/credentials/load")
+    async def load_credentials(request: Request):
+        form = await request.form(max_fields=10)
+        project_id = str(form.get("project_id", ""))
+        try:
+            config_store.load_api_key_from_keychain()
+        except CredentialStoreError as exc:
+            return RedirectResponse(
+                url(f"projects/{project_id}/settings?error={_query_value(str(exc))}"),
+                status_code=303,
+            )
+        notice = f"API key loaded from {system_credential_store_name()} for this Watson session."
+        return RedirectResponse(
+            url(f"projects/{project_id}/settings?notice={_query_value(notice)}"),
+            status_code=303,
+        )
+
+    @app.post(f"/{session_token}/credentials/forget")
+    async def forget_credentials(request: Request):
+        form = await request.form(max_fields=10)
+        project_id = str(form.get("project_id", ""))
+        config_store.forget_session_api_key()
+        return RedirectResponse(
+            url(f"projects/{project_id}/settings?notice=API+key+removed+from+this+Watson+session."),
+            status_code=303,
+        )
+
+    @app.post(f"/{session_token}/credentials/migrate")
+    async def migrate_credentials(request: Request):
+        form = await request.form(max_fields=10)
+        project_id = str(form.get("project_id", ""))
+        try:
+            config_store.migrate_legacy_api_key_to_keychain()
+        except CredentialStoreError as exc:
+            return RedirectResponse(
+                url(f"projects/{project_id}/settings?error={_query_value(str(exc))}"),
+                status_code=303,
+            )
+        notice = (
+            f"Legacy API key moved to {system_credential_store_name()}, loaded for this session, "
+            "and removed from Watson's old file vault."
+        )
+        return RedirectResponse(
+            url(f"projects/{project_id}/settings?notice={_query_value(notice)}"),
+            status_code=303,
+        )
 
     @app.post(f"/{session_token}/credentials/delete")
     async def delete_credentials(request: Request):
         form = await request.form(max_fields=10)
         project_id = str(form.get("project_id", ""))
-        ConfigStore(project_store.data_dir).delete_api_key()
-        return RedirectResponse(url(f"projects/{project_id}/settings?notice=API+key+deleted."), status_code=303)
+        try:
+            config_store.delete_api_key_from_keychain()
+        except CredentialStoreError as exc:
+            return RedirectResponse(
+                url(f"projects/{project_id}/settings?error={_query_value(str(exc))}"),
+                status_code=303,
+            )
+        return RedirectResponse(
+            url(f"projects/{project_id}/settings?notice=API+key+deleted+from+the+system+credential+store."),
+            status_code=303,
+        )
+
+    @app.post(f"/{session_token}/credentials/delete-legacy")
+    async def delete_legacy_credentials(request: Request):
+        form = await request.form(max_fields=10)
+        project_id = str(form.get("project_id", ""))
+        config_store.delete_legacy_api_key()
+        return RedirectResponse(
+            url(f"projects/{project_id}/settings?notice=Legacy+file-vault+API+key+deleted."),
+            status_code=303,
+        )
 
     @app.post(f"/{session_token}/projects/{{project_id}}/runs")
     async def start_run(request: Request, project_id: str):
@@ -308,9 +376,11 @@ def create_app(
             inputs = project_store.list_inputs(project_id)
             if not inputs:
                 raise ProjectError("Add at least one input file before processing.")
-            api_key = ConfigStore(project_store.data_dir).get_api_key()
+            api_key = config_store.get_session_api_key()
             if not api_key:
-                raise ProjectError("Add a Gemini API key in project settings before processing.")
+                raise ProjectError(
+                    "Explicitly load the Gemini API key from the system credential store in project settings before processing."
+                )
             saved = project_store.get_settings(project_id)
             action = str(form.get("action", "all"))
             retry_mode = str(form.get("retry_mode", "failed"))
@@ -417,7 +487,7 @@ def create_app(
 
     @app.get(f"/{session_token}/static/{{filename}}")
     async def static_asset(filename: str):
-        if filename not in {"watson.css", "watson.js"}:
+        if filename not in {"watson.css", "settings.css", "watson.js"}:
             raise HTTPException(status_code=404)
         return FileResponse(static_dir() / filename)
 
