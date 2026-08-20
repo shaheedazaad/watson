@@ -25,21 +25,17 @@ Watson only sends document text to Google's Gemini model when you explicitly cli
 
 You don't need to know Python, the command line, or anything technical to install or run Watson — the installer sets everything up for you.
 
-=== "macOS or Linux"
+**macOS or Linux** — open Terminal and paste:
 
-    Open Terminal and paste:
+```sh
+curl -fsSL https://raw.githubusercontent.com/shaheedazaad/watson/main/scripts/install.sh | sh
+```
 
-    ```sh
-    curl -fsSL https://raw.githubusercontent.com/shaheedazaad/watson/main/scripts/install.sh | sh
-    ```
+**Windows** — open PowerShell and paste:
 
-=== "Windows"
-
-    Open PowerShell and paste:
-
-    ```powershell
-    irm https://raw.githubusercontent.com/shaheedazaad/watson/main/scripts/install.ps1 | iex
-    ```
+```powershell
+irm https://raw.githubusercontent.com/shaheedazaad/watson/main/scripts/install.ps1 | iex
+```
 
 To update later, run the same command again.
 

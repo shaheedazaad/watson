@@ -9,17 +9,17 @@ This walks through checking one study, start to finish. It takes about five minu
 
 If you haven't installed Watson yet, open a terminal and paste the command for your system.
 
-=== "macOS or Linux"
+**macOS or Linux:**
 
-    ```sh
-    curl -fsSL https://raw.githubusercontent.com/shaheedazaad/watson/main/scripts/install.sh | sh
-    ```
+```sh
+curl -fsSL https://raw.githubusercontent.com/shaheedazaad/watson/main/scripts/install.sh | sh
+```
 
-=== "Windows"
+**Windows:**
 
-    ```powershell
-    irm https://raw.githubusercontent.com/shaheedazaad/watson/main/scripts/install.ps1 | iex
-    ```
+```powershell
+irm https://raw.githubusercontent.com/shaheedazaad/watson/main/scripts/install.ps1 | iex
+```
 
 Then, any time you want to use Watson, open a terminal and type:
 
