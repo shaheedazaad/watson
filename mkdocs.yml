@@ -23,6 +23,8 @@ nav:
 markdown_extensions:
   - admonition
   - pymdownx.details
+  - pymdownx.highlight:
+      css_class: codehilite
   - pymdownx.superfences
   - tables
   - toc:
