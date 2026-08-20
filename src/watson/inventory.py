@@ -190,6 +190,7 @@ def build_study_map(inventory: InventoryResult) -> StudyMap:
                 article_says_preregistered=study.article_says_preregistered,
                 preregistration_references=study.preregistration_references,
                 matched_preregistration_file_path=matched_path,
+                supplemental_material_file_paths=documents_by_type[DocumentType.SUPPLEMENTAL_MATERIAL],
                 match_status=match_status,
                 match_confidence=match_confidence,
                 competing_preregistration_file_paths=competing_paths,

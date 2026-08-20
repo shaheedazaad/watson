@@ -86,7 +86,7 @@ html.dark .status.complete, html.dark .status.completed { color: oklch(0.78 0.12
 .project-link::after { content: ""; position: absolute; inset: 0; }
 
 /* Result summary tiles */
-.result-strip { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 16px; }
+.result-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 16px; }
 .result-strip > div { background: var(--card); padding: 14px 16px; }
 .result-strip strong { display: block; font-size: 22px; font-weight: 600; color: var(--primary); }
 .result-strip .danger-number strong { color: var(--destructive); }
@@ -184,6 +184,13 @@ aside .card + .card, aside .settings-form + .settings-form { margin-top: 16px; }
 .inline-notes { background: var(--accent); border-radius: var(--radius-sm); padding: 12px 14px; margin: 16px 0; }
 .inline-notes ul { margin: 6px 0 0; padding-left: 18px; }
 .no-findings { margin: 16px 0 0; color: var(--muted-foreground); font-size: 13px; }
+
+/* Finding sections */
+.finding-section-title { display: flex; align-items: center; gap: 8px; margin: 24px 0 0; padding-top: 16px; border-top: 1px solid var(--border); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted-foreground); font-weight: 600; }
+.finding-card[data-section="missing"] > header { border-left: 3px solid #d97706; }
+.finding-card[data-section="unregistered"] > header { border-left: 3px solid #7c3aed; }
+.finding-card[data-section="deviation"] > header { border-left: 3px solid #dc2626; }
+.finding-card[data-section="degree-of-freedom"] > header { border-left: 3px solid #0891b2; }
 
 /* Finding cards */
 .finding-list { display: grid; gap: 12px; margin-top: 18px; }

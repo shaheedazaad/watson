@@ -310,6 +310,53 @@ def test_reports_and_specific_findings_are_readable_in_browser(tmp_path: Path) -
                         "apa_citation": "Researcher, A. (2026). Example article.",
                         "overall_assessment": "The article partially adhered to the plan.",
                         "review_notes": [],
+                        "supplemental_file_paths": ["supplement.pdf"],
+                        "preregistration_inventory": {
+                            "items": [
+                                {
+                                    "item_id": "P1",
+                                    "category": "exclusion_criteria",
+                                    "statement": "Exclude duplicate responses.",
+                                    "specificity": "unspecified",
+                                }
+                            ]
+                        },
+                        "article_inventory": {
+                            "items": [
+                                {
+                                    "item_id": "A1",
+                                    "category": "exclusion_criteria",
+                                    "statement": "Excluded attention-check failures.",
+                                }
+                            ]
+                        },
+                        "missing_preregistered_items": [
+                            {
+                                "prereg_item_id": "P2",
+                                "category": "analysis_model",
+                                "preregistered_plan": "A mediation analysis was promised.",
+                                "evidence": "Preregistration p. 4.",
+                                "confidence": "high",
+                            }
+                        ],
+                        "unregistered_article_items": [
+                            {
+                                "article_item_id": "A1",
+                                "category": "exclusion_criteria",
+                                "article_report": "An attention check was applied.",
+                                "framing": "confirmatory",
+                                "evidence": "Article p. 8.",
+                            }
+                        ],
+                        "degrees_of_freedom": [
+                            {
+                                "prereg_item_id": "P1",
+                                "category": "exclusion_criteria",
+                                "underspecification": "No outlier cutoff was named.",
+                                "plausible_alternatives": "2 SD or 3 SD.",
+                                "severity": "high",
+                            }
+                        ],
                         "deviations": [
                             {
                                 "deviation_type": "exclusion_criteria",
@@ -349,6 +396,15 @@ def test_reports_and_specific_findings_are_readable_in_browser(tmp_path: Path) -
     assert "Read report" in project_page.text
     assert "An additional exclusion rule was used." in project_page.text
     assert "Preregistration p. 3; article p. 8." in project_page.text
+    assert "1. Missing preregistered items" in project_page.text
+    assert "2. Reported but not preregistered" in project_page.text
+    assert "3. Deviations" in project_page.text
+    assert "4. Preregistration degrees of freedom" in project_page.text
+    assert "A mediation analysis was promised." in project_page.text
+    assert "No outlier cutoff was named." in project_page.text
+    assert "4 findings" in project_page.text
+    assert "Missing prereg items" in project_page.text
+    assert "Degrees of freedom" in project_page.text
     assert deviation_report.status_code == 200
     assert "Preregistration adherence report" in deviation_report.text
     assert "Exclude duplicate responses only." in deviation_report.text

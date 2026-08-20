@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
-from watson.deviation_guide import DeviationGuide, build_deviation_system_prompt
+from watson.deviation_guide import DeviationGuide
 from watson.schemas import DeviationCheckRun, StudyDeviationReport, StudyMap, StudyMapEntry
 
 
@@ -20,6 +19,7 @@ class DeviationClient(Protocol):
         root: Path,
         study: StudyMapEntry,
         guide: DeviationGuide,
+        progress: Callable[[str], None] | None = None,
     ) -> StudyDeviationReport: ...
 
 
@@ -85,11 +85,16 @@ def run_deviation_checks(
                 reports.append(report)
                 continue
 
+        position = f"({index}/{len(studies_to_check)})"
         if progress:
-            progress(f"Checking {study.label} ({index}/{len(studies_to_check)})")
+            progress(f"Checking {study.label} {position}")
+
+        def stage_progress(message: str, label=study.label, position=position) -> None:
+            if progress:
+                progress(f"{label} {position}: {message}")
 
         try:
-            report = client.check_preregistration_adherence(root, study, guide)
+            report = client.check_preregistration_adherence(root, study, guide, stage_progress)
             report.status = "completed"
             report.generated_at = report.generated_at or datetime.now(tz=timezone.utc)
             report.model = model
@@ -143,14 +148,14 @@ def validate_report_deviation_types(
 
 
 def validate_report_consistency(report: StudyDeviationReport) -> None:
-    if report.deviations:
+    if report.finding_count:
         return
     prose = " ".join([report.summary, report.overall_assessment])
     if mentions_potential_deviations(prose):
         note = (
-            "The model mentioned possible deviations in prose but returned an empty "
-            "structured deviations list. Re-run this study with --force so Watson can "
-            "ask for structured findings."
+            "The model mentioned possible deviations in prose but returned no "
+            "structured findings in any section. Re-run this study with --force so "
+            "Watson can ask for structured findings."
         )
         if note not in report.review_notes:
             report.review_notes.append(note)
@@ -173,6 +178,8 @@ def render_deviation_markdown(run: DeviationCheckRun) -> str:
             f"{len(run.skipped_studies)} study/studies were skipped because they were not ready for deviation checking."
         ),
         "",
+        render_run_totals(run),
+        "",
     ]
 
     if run.review_notes:
@@ -194,6 +201,17 @@ def render_deviation_markdown(run: DeviationCheckRun) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def render_run_totals(run: DeviationCheckRun) -> str:
+    completed = [report for report in run.reports if report.status != "failed"]
+    return (
+        "Across the completed studies Watson reported "
+        f"{sum(len(report.missing_preregistered_items) for report in completed)} missing preregistered item(s), "
+        f"{sum(len(report.unregistered_article_items) for report in completed)} reported item(s) that were not preregistered, "
+        f"{sum(len(report.deviations) for report in completed)} deviation(s), and "
+        f"{sum(len(report.degrees_of_freedom) for report in completed)} preregistration degree(s) of freedom."
+    )
+
+
 def save_deviation_markdown(path: Path, run: DeviationCheckRun) -> None:
     path.write_text(render_deviation_markdown(run), encoding="utf-8")
 
@@ -213,9 +231,11 @@ def render_study_report(report: StudyDeviationReport) -> list[str]:
     lines.extend([
         f"- Article: `{report.article_file_path}`",
         f"- Preregistration: `{report.preregistration_file_path or ''}`",
-        f"- Status: `{report.status}`",
-        "",
     ])
+    if report.supplemental_file_paths:
+        supplements = ", ".join(f"`{path}`" for path in report.supplemental_file_paths)
+        lines.append(f"- Supplemental materials: {supplements}")
+    lines.extend([f"- Status: `{report.status}`", ""])
 
     if has_real_error(report.error):
         lines.extend([f"Error: {report.error}", ""])
@@ -228,18 +248,127 @@ def render_study_report(report: StudyDeviationReport) -> list[str]:
         lines.extend(["Review notes:", ""])
         lines.extend(f"- {note}" for note in report.review_notes)
         lines.append("")
+    if report.stage_errors:
+        lines.extend(["Incomplete stages:", ""])
+        lines.extend(f"- {note}" for note in report.stage_errors)
+        lines.append("")
 
-    if not report.deviations:
+    lines.extend(render_inventory_coverage(report))
+    lines.extend(render_missing_preregistered_items(report))
+    lines.extend(render_unregistered_article_items(report))
+    lines.extend(render_deviations(report))
+    lines.extend(render_degrees_of_freedom(report))
+    lines.extend(render_inventory_appendix(report))
+
+    if not report.finding_count:
         if mentions_potential_deviations(" ".join([report.summary, report.overall_assessment])):
             lines.extend(
                 [
-                    "No structured deviations were returned by the model, but the prose assessment appears to mention potential deviations.",
+                    "No structured findings were returned by the model, but the prose assessment appears to mention potential issues.",
                     "Re-run this study with `--force` to request structured findings.",
                     "",
                 ]
             )
-        else:
-            lines.extend(["No deviations were reported by the model.", ""])
+
+    return lines
+
+
+def render_inventory_coverage(report: StudyDeviationReport) -> list[str]:
+    prereg_items = report.preregistration_inventory.items if report.preregistration_inventory else []
+    article_items = report.article_inventory.items if report.article_inventory else []
+    if not prereg_items and not article_items:
+        return []
+    underspecified = sum(
+        1 for item in prereg_items if item.specificity in {"partially_specified", "unspecified"}
+    )
+    return [
+        "#### Inventory Coverage",
+        "",
+        f"- Preregistered commitments inventoried: {len(prereg_items)} ({underspecified} not fully specified)",
+        f"- Reported actions inventoried from the article and supplements: {len(article_items)}",
+        "",
+    ]
+
+
+def render_missing_preregistered_items(report: StudyDeviationReport) -> list[str]:
+    lines = ["#### 1. Missing Preregistered Items", ""]
+    if not report.missing_preregistered_items:
+        lines.extend(["Every preregistered item was located in the article or supplements.", ""])
+        return lines
+
+    lines.extend(
+        [
+            "| Prereg item | Category | Preregistered plan | Disclosed | Confidence |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+    )
+    for item in report.missing_preregistered_items:
+        lines.append(
+            f"| {escape_table(item.prereg_item_id)} | {escape_table(markdown_escape(item.category))} | "
+            f"{escape_table(item.preregistered_plan)} | {escape_table(item.disclosed)} | "
+            f"{escape_table(item.confidence)} |"
+        )
+    lines.append("")
+    for number, item in enumerate(report.missing_preregistered_items, start=1):
+        lines.extend(
+            [
+                f"##### Missing {number}: {markdown_escape(item.category)} ({item.prereg_item_id})",
+                "",
+                f"Preregistered plan: {item.preregistered_plan}",
+                "",
+                f"Where Watson looked: {item.searched_for or 'Not reported'}",
+                "",
+                f"Evidence: {item.evidence or 'Not reported'}",
+                "",
+                f"- Disclosed: {item.disclosed or 'Not reported'}",
+                f"- Confidence: {item.confidence or 'Not reported'}",
+                "",
+            ]
+        )
+    return lines
+
+
+def render_unregistered_article_items(report: StudyDeviationReport) -> list[str]:
+    lines = ["#### 2. Reported But Not Preregistered", ""]
+    if not report.unregistered_article_items:
+        lines.extend(["Everything reported in the article was traced to the preregistration.", ""])
+        return lines
+
+    lines.extend(
+        [
+            "| Article item | Category | Reported | Framing | Disclosed | Confidence |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+    )
+    for item in report.unregistered_article_items:
+        lines.append(
+            f"| {escape_table(item.article_item_id)} | {escape_table(markdown_escape(item.category))} | "
+            f"{escape_table(item.article_report)} | {escape_table(item.framing)} | "
+            f"{escape_table(item.disclosed)} | {escape_table(item.confidence)} |"
+        )
+    lines.append("")
+    for number, item in enumerate(report.unregistered_article_items, start=1):
+        lines.extend(
+            [
+                f"##### Unregistered {number}: {markdown_escape(item.category)} ({item.article_item_id})",
+                "",
+                f"Article report: {item.article_report}",
+                "",
+                f"Evidence: {item.evidence or 'Not reported'}",
+                "",
+                f"- Framing in the article: {item.framing or 'Not reported'}",
+                f"- Disclosed as unplanned: {item.disclosed or 'Not reported'}",
+                f"- Confidence: {item.confidence or 'Not reported'}",
+                "",
+            ]
+        )
+    return lines
+
+
+def render_deviations(report: StudyDeviationReport) -> list[str]:
+    lines = ["#### 3. Deviations", ""]
+    if not report.deviations:
+        lines.extend(["No deviations were reported by the model.", ""])
         return lines
 
     lines.extend(
@@ -258,13 +387,14 @@ def render_study_report(report: StudyDeviationReport) -> list[str]:
     lines.append("")
 
     for number, finding in enumerate(report.deviations, start=1):
-        lines.extend([f"#### Finding {number}: {markdown_escape(finding.deviation_type)}", ""])
+        lines.extend([f"##### Finding {number}: {markdown_escape(finding.deviation_type)}", ""])
         lines.extend(
             [
-                f"- Confidence: {finding.confidence}",
-                f"- Disclosed: {finding.disclosed}",
-                f"- Explanation given: {finding.explanation_given}",
-                f"- Robustness check: {finding.robustness_check}",
+                f"- Confidence: {finding.confidence or 'Not reported'}",
+                f"- Disclosed: {finding.disclosed or 'Not reported'}",
+                f"- Explanation given: {finding.explanation_given or 'Not reported'}",
+                f"- Robustness check: {finding.robustness_check or 'Not reported'}",
+                f"- Inventory items: {finding.prereg_item_id or 'n/a'} vs {finding.article_item_id or 'n/a'}",
                 "",
                 f"Preregistered plan: {finding.preregistered_plan}",
                 "",
@@ -274,6 +404,93 @@ def render_study_report(report: StudyDeviationReport) -> list[str]:
                 "",
             ]
         )
+    return lines
+
+
+def render_degrees_of_freedom(report: StudyDeviationReport) -> list[str]:
+    lines = ["#### 4. Preregistration Degrees Of Freedom", ""]
+    if not report.degrees_of_freedom:
+        lines.extend(
+            ["No underspecified preregistered commitments were reported by the model.", ""]
+        )
+        return lines
+
+    lines.extend(
+        [
+            "| Prereg item | Category | Underspecification | Severity |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    for finding in report.degrees_of_freedom:
+        lines.append(
+            f"| {escape_table(finding.prereg_item_id)} | {escape_table(markdown_escape(finding.category))} | "
+            f"{escape_table(finding.underspecification)} | {escape_table(finding.severity)} |"
+        )
+    lines.append("")
+    for number, finding in enumerate(report.degrees_of_freedom, start=1):
+        lines.extend(
+            [
+                f"##### Degree of freedom {number}: {markdown_escape(finding.category)} ({finding.prereg_item_id})",
+                "",
+                f"- Severity: {finding.severity or 'Not reported'}",
+                "",
+                f"Preregistered plan: {finding.preregistered_plan}",
+                "",
+                f"What is left open: {finding.underspecification}",
+                "",
+                f"Defensible alternatives the wording permits: {finding.plausible_alternatives or 'Not reported'}",
+                "",
+                f"What the article did: {finding.article_choice or 'Not reported'}",
+                "",
+                f"Potential impact: {finding.potential_impact or 'Not reported'}",
+                "",
+                f"Evidence: {finding.evidence or 'Not reported'}",
+                "",
+            ]
+        )
+    return lines
+
+
+def render_inventory_appendix(report: StudyDeviationReport) -> list[str]:
+    lines: list[str] = []
+    prereg = report.preregistration_inventory
+    if prereg and prereg.items:
+        lines.extend(
+            [
+                "<details>",
+                "<summary>Preregistration inventory</summary>",
+                "",
+                "| Item | Category | Commitment | Specification | Specificity | Location |",
+                "| --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for item in prereg.items:
+            lines.append(
+                f"| {escape_table(item.item_id)} | {escape_table(markdown_escape(item.category))} | "
+                f"{escape_table(item.statement)} | {escape_table(item.specification)} | "
+                f"{escape_table(markdown_escape(item.specificity))} | {escape_table(item.location)} |"
+            )
+        lines.extend(["", "</details>", ""])
+
+    article = report.article_inventory
+    if article and article.items:
+        lines.extend(
+            [
+                "<details>",
+                "<summary>Article and supplement inventory</summary>",
+                "",
+                "| Item | Category | What was done | Specification | Framing | Source | Location |",
+                "| --- | --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for item in article.items:
+            lines.append(
+                f"| {escape_table(item.item_id)} | {escape_table(markdown_escape(item.category))} | "
+                f"{escape_table(item.statement)} | {escape_table(item.specification)} | "
+                f"{escape_table(item.framing)} | {escape_table(item.source_file_path)} | "
+                f"{escape_table(item.location)} |"
+            )
+        lines.extend(["", "</details>", ""])
 
     return lines
 
@@ -288,6 +505,8 @@ def build_run_review_notes(
     for report in reports:
         if report.status == "failed":
             notes.append(f"{report.study_label} failed during deviation checking.")
+        for stage_error in report.stage_errors:
+            notes.append(f"{report.study_label}: {stage_error}")
     for study in skipped_studies(study_map):
         notes.append(f"{study.label} was skipped because it is not ready for deviation checking.")
     return dedupe(notes)

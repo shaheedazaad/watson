@@ -208,6 +208,7 @@ def run_project(
                     cancelled=cancellation.is_cancelled,
                 )
             save_upload_cache(upload_cache_path, client.upload_cache)
+            _release_context_caches(client)
             deviation_report_path = paths.outputs / DEVIATION_REPORT_FILENAME
             save_deviation_markdown(deviation_report_path, deviation_run)
             result.deviation_path = str(paths.state / DEVIATION_RUN_FILENAME)
@@ -225,7 +226,7 @@ def run_project(
     usage = getattr(client, "usage", {})
     safe_usage: dict[str, int] = {}
     if isinstance(usage, dict):
-        for key in ("requests", "prompt_tokens", "output_tokens", "total_tokens"):
+        for key in ("requests", "prompt_tokens", "output_tokens", "cached_tokens", "total_tokens"):
             value = usage.get(key)
             if isinstance(value, int) and value >= 0:
                 result.summary[key] = value
@@ -233,6 +234,16 @@ def run_project(
     _write_reproducibility(paths, settings, safe_usage)
     progress.emit("complete", "Run complete")
     return result
+
+
+def _release_context_caches(client: object) -> None:
+    """Explicit Gemini caches bill per hour, so drop them once the run is done."""
+    release = getattr(client, "release_caches", None)
+    if callable(release):
+        try:
+            release()
+        except Exception:
+            pass
 
 
 def _raise_if_cancelled(signal: CancellationSignal) -> None:

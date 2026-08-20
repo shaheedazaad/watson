@@ -596,6 +596,9 @@ def _load_project_summary(paths) -> dict:
         "checked": 0,
         "failed": 0,
         "deviations": 0,
+        "missing": 0,
+        "unregistered": 0,
+        "degrees_of_freedom": 0,
         "warnings": [],
         "items": [],
         "downloads": [],
@@ -636,12 +639,17 @@ def _load_project_summary(paths) -> dict:
             reports = run.get("reports", [])
             result["checked"] = len(reports)
             result["failed"] = sum(report.get("status") == "failed" for report in reports)
-            result["deviations"] = sum(len(report.get("deviations", [])) for report in reports)
             result["warnings"].extend(run.get("review_notes", []))
             result["items"] = [
                 _deviation_study_item(report, index)
                 for index, report in enumerate(reports, start=1)
             ]
+            result["missing"] = sum(len(item["missing_items"]) for item in result["items"])
+            result["unregistered"] = sum(len(item["unregistered_items"]) for item in result["items"])
+            result["degrees_of_freedom"] = sum(
+                len(item["degrees_of_freedom"]) for item in result["items"]
+            )
+            result["deviations"] = sum(len(item["findings"]) for item in result["items"])
             result["downloads"].extend([DEVIATION_RUN_FILENAME, "watson-prereg-adherence-report.md"])
             result["reports"].append(
                 {"kind": "preregistration", "label": "Read preregistration report"}
@@ -678,23 +686,72 @@ def _inventory_study_item(study: dict, match: dict | None, index: int) -> dict:
         "match_confidence": match.get("confidence", 0),
         "rationale": match.get("rationale", ""),
         "findings": [],
+        "missing_items": [],
+        "unregistered_items": [],
+        "degrees_of_freedom": [],
         "review_notes": [],
+        "stage_errors": [],
+        "supplemental_file_paths": [],
+        "coverage": {},
     }
 
 
 def _deviation_study_item(report: dict, index: int) -> dict:
+    missing = report.get("missing_preregistered_items", [])
+    unregistered = report.get("unregistered_article_items", [])
+    deviations = report.get("deviations", [])
+    degrees_of_freedom = report.get("degrees_of_freedom", [])
+    prereg_inventory = report.get("preregistration_inventory") or {}
+    article_inventory = report.get("article_inventory") or {}
+    prereg_items = prereg_inventory.get("items", [])
     return {
         "anchor": f"study-{index}",
         "label": report.get("study_label", "Untitled study"),
         "status": report.get("status", "unknown"),
         "detail": report.get("overall_assessment") or report.get("summary", ""),
         "summary": report.get("summary", ""),
-        "deviations": len(report.get("deviations", [])),
+        "deviations": len(missing) + len(unregistered) + len(deviations) + len(degrees_of_freedom),
         "article_file_path": report.get("article_file_path", ""),
         "preregistration_file_path": report.get("preregistration_file_path", ""),
+        "supplemental_file_paths": report.get("supplemental_file_paths", []),
         "apa_citation": report.get("apa_citation", ""),
         "error": report.get("error", ""),
         "review_notes": report.get("review_notes", []),
+        "stage_errors": report.get("stage_errors", []),
+        "coverage": {
+            "prereg_items": len(prereg_items),
+            "article_items": len(article_inventory.get("items", [])),
+            "underspecified": sum(
+                item.get("specificity") in {"partially_specified", "unspecified"}
+                for item in prereg_items
+            ),
+        },
+        "missing_items": [
+            {
+                "number": number,
+                "prereg_item_id": item.get("prereg_item_id", ""),
+                "category": item.get("category", "uncategorised"),
+                "preregistered_plan": item.get("preregistered_plan", ""),
+                "searched_for": item.get("searched_for", ""),
+                "evidence": item.get("evidence", ""),
+                "disclosed": item.get("disclosed", ""),
+                "confidence": item.get("confidence", ""),
+            }
+            for number, item in enumerate(missing, start=1)
+        ],
+        "unregistered_items": [
+            {
+                "number": number,
+                "article_item_id": item.get("article_item_id", ""),
+                "category": item.get("category", "uncategorised"),
+                "article_report": item.get("article_report", ""),
+                "framing": item.get("framing", ""),
+                "evidence": item.get("evidence", ""),
+                "disclosed": item.get("disclosed", ""),
+                "confidence": item.get("confidence", ""),
+            }
+            for number, item in enumerate(unregistered, start=1)
+        ],
         "findings": [
             {
                 "number": number,
@@ -708,7 +765,22 @@ def _deviation_study_item(report: dict, index: int) -> dict:
                 "explanation_given": finding.get("explanation_given", ""),
                 "robustness_check": finding.get("robustness_check", ""),
             }
-            for number, finding in enumerate(report.get("deviations", []), start=1)
+            for number, finding in enumerate(deviations, start=1)
+        ],
+        "degrees_of_freedom": [
+            {
+                "number": number,
+                "prereg_item_id": finding.get("prereg_item_id", ""),
+                "category": finding.get("category", "uncategorised"),
+                "preregistered_plan": finding.get("preregistered_plan", ""),
+                "underspecification": finding.get("underspecification", ""),
+                "plausible_alternatives": finding.get("plausible_alternatives", ""),
+                "article_choice": finding.get("article_choice", ""),
+                "potential_impact": finding.get("potential_impact", ""),
+                "evidence": finding.get("evidence", ""),
+                "severity": finding.get("severity", ""),
+            }
+            for number, finding in enumerate(degrees_of_freedom, start=1)
         ],
     }
 
@@ -762,7 +834,7 @@ def _load_browser_report(paths, kind: str) -> dict | None:
             _deviation_study_item(report, index)
             for index, report in enumerate(run.get("reports", []), start=1)
         ]
-        findings = sum(len(study["findings"]) for study in studies)
+        findings = sum(study["deviations"] for study in studies)
         failed = sum(study["status"] == "failed" for study in studies)
         return {
             "kind": "preregistration",
@@ -770,7 +842,9 @@ def _load_browser_report(paths, kind: str) -> dict | None:
             "generated_at": run.get("generated_at", ""),
             "model": run.get("model", ""),
             "summary": (
-                f"Watson checked {len(studies)} studies and returned {findings} findings. "
+                f"Watson checked {len(studies)} studies and returned {findings} findings across "
+                "missing preregistered items, unregistered reported items, deviations, and "
+                "preregistration degrees of freedom. "
                 f"{failed} studies failed and {len(run.get('skipped_studies', []))} were skipped."
             ),
             "warnings": run.get("review_notes", []),

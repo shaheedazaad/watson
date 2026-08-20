@@ -31,7 +31,10 @@
   <div><strong>{{ summary.studies }}</strong><span>Studies found</span></div>
   <div><strong>{{ summary.ready }}</strong><span>Ready to check</span></div>
   <div><strong>{{ summary.checked }}</strong><span>Studies checked</span></div>
-  <div><strong>{{ summary.deviations }}</strong><span>Findings</span></div>
+  <div><strong>{{ summary.missing }}</strong><span>Missing prereg items</span></div>
+  <div><strong>{{ summary.unregistered }}</strong><span>Not preregistered</span></div>
+  <div><strong>{{ summary.deviations }}</strong><span>Deviations</span></div>
+  <div><strong>{{ summary.degrees_of_freedom }}</strong><span>Degrees of freedom</span></div>
   <div class="{% if summary.failed %}danger-number{% endif %}"><strong>{{ summary.failed }}</strong><span>Failed</span></div>
 </section>
 {% if summary.usage %}<p class="resource-line">Last run: {{ summary.usage.requests|default(0) }} model request{% if summary.usage.requests|default(0) != 1 %}s{% endif %} · {{ summary.usage.total_tokens|default(0) }} total tokens</p>{% endif %}

@@ -38,6 +38,17 @@ Projects live in the normal per-user application-data directory. The browser wor
 
 Supported inputs are PDF, TXT, CSV, HTML/HTM, XML, JSON, and RTF. Each file is limited to 50 MB and each upload request to 200 MB.
 
+## How the preregistration check works
+
+For each study with a matched preregistration, Watson runs four separate model requests instead of one combined judgement:
+
+1. **Inventory the preregistration.** Every commitment the researchers made about what they would do and how, with the concrete specification given for each and whether it is fully specified, partially specified, or unspecified.
+2. **Inventory what was done.** Every action the article and its supplemental materials report for that study, with how the article frames it — confirmatory, exploratory, robustness, or unclear.
+3. **Diff the two inventories.** Items promised but never reported, items reported but never preregistered, and items present in both that were executed differently from the plan.
+4. **Audit the preregistration for degrees of freedom.** Commitments left open enough that more than one defensible result was available, whether or not the article exploits them.
+
+The report carries all four as separate sections, plus both inventories as appendices. Each study's documents are uploaded once and held in a Gemini context cache shared by all four stages, so the article and preregistration are not re-sent per request; when the API declines to cache them, Watson attaches the documents to each stage instead.
+
 ## Reproducible command-line runs
 
 The noninteractive command calls the same runner as the browser app:

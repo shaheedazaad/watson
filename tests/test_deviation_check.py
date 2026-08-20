@@ -21,9 +21,14 @@ from watson.schemas import DeviationCheckRun, DeviationFinding, StudyDeviationRe
 class FakeDeviationClient:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.stages: list[str] = []
 
-    def check_preregistration_adherence(self, root: Path, study: StudyMapEntry, guide):
+    def check_preregistration_adherence(self, root: Path, study: StudyMapEntry, guide, progress=None):
         self.calls.append(study.study_id)
+        for stage in ("inventorying the preregistration", "diffing the two inventories"):
+            self.stages.append(stage)
+            if progress:
+                progress(stage)
         return StudyDeviationReport(
             study_id=study.study_id,
             study_label=study.label,
@@ -48,8 +53,8 @@ class FakeDeviationClient:
 
 
 class FakeStaleModelDeviationClient(FakeDeviationClient):
-    def check_preregistration_adherence(self, root: Path, study: StudyMapEntry, guide):
-        report = super().check_preregistration_adherence(root, study, guide)
+    def check_preregistration_adherence(self, root: Path, study: StudyMapEntry, guide, progress=None):
+        report = super().check_preregistration_adherence(root, study, guide, progress)
         report.model = "old-model"
         return report
 
@@ -229,9 +234,8 @@ def test_empty_deviations_with_deviation_prose_gets_review_note() -> None:
     validate_report_consistency(report)
     markdown = "\n".join(render_study_report(report))
 
-    assert "empty structured deviations list" in report.review_notes[0]
-    assert "No deviations were reported by the model." not in markdown
-    assert "No structured deviations were returned" in markdown
+    assert "no structured findings in any section" in report.review_notes[0]
+    assert "No structured findings were returned by the model" in markdown
 
 
 def test_render_study_report_prefers_single_overall_assessment_block() -> None:

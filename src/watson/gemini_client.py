@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import mimetypes
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Callable, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -12,10 +14,14 @@ from watson.deviation_guide import DeviationGuide, build_deviation_system_prompt
 from watson.file_context import build_file_context_prompt
 from watson.file_support import supported_extensions
 from watson.schemas import (
+    ArticleInventory,
+    DegreesOfFreedomResult,
     DocumentClassification,
     DocumentType,
     FileRecord,
     GeminiFileRecord,
+    InventoryDiff,
+    PreregistrationInventory,
     PreregistrationMatch,
     StudyDeviationReport,
     StudyMapEntry,
@@ -31,12 +37,34 @@ UPLOAD_EXTENSIONS = supported_extensions()
 DEFAULT_TEMPERATURE = 0.7
 THINKING_LEVEL_OPTIONS = ("minimal", "low", "medium", "high")
 DEFAULT_THINKING_LEVEL = "high"
+CONTEXT_CACHE_TTL_SECONDS = 3600
+FILE_ACTIVATION_TIMEOUT_SECONDS = 60
+FILE_POLL_SECONDS = 2
+
+INVENTORY_CATEGORIES = (
+    "hypothesis",
+    "sample_size",
+    "stopping_rule",
+    "exclusion_criteria",
+    "measure",
+    "outcome",
+    "analysis_model",
+    "transformation",
+    "multiple_comparison_correction",
+    "procedure",
+    "other",
+)
 
 T = TypeVar("T", bound=BaseModel)
 
 
 class GeminiError(RuntimeError):
     pass
+
+
+class ContextCacheRecord(BaseModel):
+    name: str
+    expires_at: datetime
 
 
 class GeminiResearchClient:
@@ -60,11 +88,12 @@ class GeminiResearchClient:
         self._types = types
         self._client = genai.Client(api_key=api_key)
         self.upload_cache = upload_cache or {}
-        self._deviation_checklist_cache: dict[str, str] = {}
+        self._context_caches: dict[str, ContextCacheRecord] = {}
         self.usage = {
             "requests": 0,
             "prompt_tokens": 0,
             "output_tokens": 0,
+            "cached_tokens": 0,
             "total_tokens": 0,
         }
 
@@ -156,43 +185,285 @@ when no candidate fits, and "needs_review" when evidence is too weak.
         contents.append(prompt)
         return self._generate_json(contents if len(contents) > 1 else prompt, PreregistrationMatch)
 
+    # ------------------------------------------------------------------
+    # Preregistration adherence pipeline
+    # ------------------------------------------------------------------
+
     def check_preregistration_adherence(
         self,
         root: Path,
         study: StudyMapEntry,
         guide: DeviationGuide,
+        progress: Callable[[str], None] | None = None,
     ) -> StudyDeviationReport:
+        """Run the four-stage adherence pipeline for one study.
+
+        Stage 1 inventories what the preregistration promised, stage 2 inventories
+        what the article and supplements actually report, stage 3 diffs the two,
+        and stage 4 audits the preregistration inventory for researcher degrees of
+        freedom. Each stage is its own request; the documents are uploaded once and
+        shared across all four through an explicit context cache when the API
+        allows one.
+        """
         if not study.matched_preregistration_file_path:
             raise GeminiError(f"{study.label} has no matched preregistration file.")
 
-        article_record = self._record_for_existing_path(root, study.article_file_path)
-        prereg_record = self._record_for_existing_path(root, study.matched_preregistration_file_path)
-        checklist = self._prepare_deviation_checklist(root, guide, study, prereg_record)
-        prompt = build_deviation_prompt(guide, study, checklist)
-        contents: list[Any] = [
-            self._upload_file(root / study.article_file_path, article_record),
-            self._upload_file(root / study.matched_preregistration_file_path, prereg_record),
-            prompt,
-        ]
-        return self._generate_json(contents, StudyDeviationReport)
+        def announce(message: str) -> None:
+            if progress:
+                progress(message)
 
-    def _prepare_deviation_checklist(
+        prereg_part, article_parts, supplement_paths = self._study_documents(root, study)
+        cache_name = self._ensure_study_cache(study, guide, [prereg_part, *article_parts])
+
+        stage_errors: list[str] = []
+
+        announce("inventorying the preregistration")
+        prereg_inventory = self._inventory_preregistration(
+            study, guide, prereg_part, cache_name
+        )
+
+        announce("inventorying the article and supplements")
+        article_inventory = self._inventory_article(
+            study, guide, article_parts, supplement_paths, cache_name
+        )
+
+        announce("diffing the two inventories")
+        diff = self._diff_inventories(
+            study,
+            guide,
+            prereg_inventory,
+            article_inventory,
+            [prereg_part, *article_parts],
+            cache_name,
+        )
+
+        announce("auditing the preregistration for degrees of freedom")
+        try:
+            degrees_of_freedom = self._assess_degrees_of_freedom(
+                study, guide, prereg_inventory, article_inventory, prereg_part, cache_name
+            )
+        except GeminiError as exc:
+            # The first three stages already carry the report; do not lose them.
+            stage_errors.append(f"Degrees-of-freedom stage failed: {exc}")
+            degrees_of_freedom = DegreesOfFreedomResult(study_id=study.study_id)
+
+        announce("collecting the citation")
+        apa_citation = self._article_citation(study, article_parts, cache_name)
+
+        review_notes = dedupe_notes(
+            [
+                *prereg_inventory.notes,
+                *article_inventory.notes,
+                *diff.notes,
+                *degrees_of_freedom.notes,
+            ]
+        )
+
+        return StudyDeviationReport(
+            study_id=study.study_id,
+            study_label=study.label,
+            article_file_path=study.article_file_path,
+            preregistration_file_path=study.matched_preregistration_file_path,
+            supplemental_file_paths=supplement_paths,
+            apa_citation=apa_citation,
+            summary=diff.summary,
+            preregistration_inventory=prereg_inventory,
+            article_inventory=article_inventory,
+            missing_preregistered_items=diff.missing_preregistered_items,
+            unregistered_article_items=diff.unregistered_article_items,
+            deviations=diff.deviations,
+            degrees_of_freedom=degrees_of_freedom.findings,
+            overall_assessment=diff.overall_assessment or diff.summary,
+            review_notes=review_notes,
+            stage_errors=stage_errors,
+        )
+
+    def _study_documents(
         self,
         root: Path,
-        guide: DeviationGuide,
         study: StudyMapEntry,
-        prereg_record: FileRecord,
-    ) -> str:
-        cache_key = f"{guide.model_dump_json()}::{study.study_id}"
-        cached = self._deviation_checklist_cache.get(cache_key)
-        if cached:
-            return cached
+    ) -> tuple[Any, list[Any], list[str]]:
+        """Upload the preregistration, article, and supplements once for this study."""
+        prereg_record = self._record_for_existing_path(root, study.matched_preregistration_file_path)
+        prereg_part = self._upload_file(root / study.matched_preregistration_file_path, prereg_record)
 
-        prompt = build_deviation_checklist_prompt(guide, study)
-        prereg_file = self._upload_file(root / study.matched_preregistration_file_path, prereg_record)
-        checklist = self._generate_text([prereg_file, prompt]).strip()
-        self._deviation_checklist_cache[cache_key] = checklist
-        return checklist
+        article_record = self._record_for_existing_path(root, study.article_file_path)
+        article_parts = [self._upload_file(root / study.article_file_path, article_record)]
+
+        supplement_paths: list[str] = []
+        for relative_path in study.supplemental_material_file_paths:
+            path = root / relative_path
+            if not path.is_file() or path.suffix.lower() not in UPLOAD_EXTENSIONS:
+                continue
+            try:
+                record = self._record_for_existing_path(root, relative_path)
+                article_parts.append(self._upload_file(path, record))
+            except Exception:
+                continue
+            supplement_paths.append(relative_path)
+
+        return prereg_part, article_parts, supplement_paths
+
+    def _inventory_preregistration(
+        self,
+        study: StudyMapEntry,
+        guide: DeviationGuide,
+        prereg_part: Any,
+        cache_name: str | None,
+    ) -> PreregistrationInventory:
+        prompt = build_preregistration_inventory_prompt(guide, study, include_guide=not cache_name)
+        contents = [prompt] if cache_name else [prereg_part, prompt]
+        inventory = self._generate_json(contents, PreregistrationInventory, cache_name)
+        inventory.study_id = study.study_id
+        inventory.study_label = study.label
+        inventory.preregistration_file_path = study.matched_preregistration_file_path or ""
+        return inventory
+
+    def _inventory_article(
+        self,
+        study: StudyMapEntry,
+        guide: DeviationGuide,
+        article_parts: list[Any],
+        supplement_paths: list[str],
+        cache_name: str | None,
+    ) -> ArticleInventory:
+        prompt = build_article_inventory_prompt(
+            guide, study, supplement_paths, include_guide=not cache_name
+        )
+        contents = [prompt] if cache_name else [*article_parts, prompt]
+        inventory = self._generate_json(contents, ArticleInventory, cache_name)
+        inventory.study_id = study.study_id
+        inventory.study_label = study.label
+        inventory.article_file_path = study.article_file_path
+        inventory.supplemental_file_paths = supplement_paths
+        return inventory
+
+    def _diff_inventories(
+        self,
+        study: StudyMapEntry,
+        guide: DeviationGuide,
+        prereg_inventory: PreregistrationInventory,
+        article_inventory: ArticleInventory,
+        parts: list[Any],
+        cache_name: str | None,
+    ) -> InventoryDiff:
+        prompt = build_inventory_diff_prompt(
+            guide,
+            study,
+            prereg_inventory,
+            article_inventory,
+            include_guide=not cache_name,
+        )
+        contents = [prompt] if cache_name else [*parts, prompt]
+        diff = self._generate_json(contents, InventoryDiff, cache_name)
+        diff.study_id = study.study_id
+        return diff
+
+    def _assess_degrees_of_freedom(
+        self,
+        study: StudyMapEntry,
+        guide: DeviationGuide,
+        prereg_inventory: PreregistrationInventory,
+        article_inventory: ArticleInventory,
+        prereg_part: Any,
+        cache_name: str | None,
+    ) -> DegreesOfFreedomResult:
+        prompt = build_degrees_of_freedom_prompt(
+            guide,
+            study,
+            prereg_inventory,
+            article_inventory,
+            include_guide=not cache_name,
+        )
+        contents = [prompt] if cache_name else [prereg_part, prompt]
+        result = self._generate_json(contents, DegreesOfFreedomResult, cache_name)
+        result.study_id = study.study_id
+        return result
+
+    def _article_citation(
+        self,
+        study: StudyMapEntry,
+        article_parts: list[Any],
+        cache_name: str | None,
+    ) -> str:
+        prompt = (
+            "Return the full APA 7th edition reference-list citation for the attached "
+            f"article ({study.article_file_path}). Return only the citation text."
+        )
+        contents = [prompt] if cache_name else [article_parts[0], prompt]
+        try:
+            return self._generate_text(contents, cache_name).strip()
+        except GeminiError:
+            return ""
+
+    # ------------------------------------------------------------------
+    # Context caching
+    # ------------------------------------------------------------------
+
+    def _ensure_study_cache(
+        self,
+        study: StudyMapEntry,
+        guide: DeviationGuide,
+        parts: list[Any],
+    ) -> str | None:
+        """Cache the study's documents and the guide so the four stages share them.
+
+        Returns the cache name, or None when the API refuses to cache this content
+        (too few tokens, unsupported model) so callers fall back to attaching the
+        files to every request.
+        """
+        key = self._cache_key(guide, parts)
+        record = self._context_caches.get(key)
+        now = datetime.now(tz=timezone.utc)
+        if record is not None:
+            if not record.name:
+                return None
+            if record.expires_at > now:
+                return record.name
+
+        try:
+            cache = self._client.caches.create(
+                model=self.model,
+                config=self._types.CreateCachedContentConfig(
+                    contents=list(parts),
+                    systemInstruction=build_deviation_system_prompt(guide),
+                    ttl=f"{CONTEXT_CACHE_TTL_SECONDS}s",
+                    displayName=f"watson-{study.study_id}"[:120],
+                ),
+            )
+        except Exception:
+            # Caching is an optimisation, never a requirement. Remember the refusal
+            # so the remaining stages of this study do not retry it.
+            self._context_caches[key] = ContextCacheRecord(name="", expires_at=now)
+            return None
+
+        name = getattr(cache, "name", "") or ""
+        expires_at = now + timedelta(seconds=CONTEXT_CACHE_TTL_SECONDS - 120)
+        self._context_caches[key] = ContextCacheRecord(name=name, expires_at=expires_at)
+        return name or None
+
+    def _cache_key(self, guide: DeviationGuide, parts: list[Any]) -> str:
+        digest = hashlib.sha256()
+        digest.update(self.model.encode("utf-8"))
+        digest.update(guide.model_dump_json().encode("utf-8"))
+        for part in parts:
+            digest.update(str(getattr(part, "name", part)).encode("utf-8"))
+        return digest.hexdigest()
+
+    def release_caches(self) -> None:
+        """Delete the explicit context caches this client created."""
+        for record in self._context_caches.values():
+            if not record.name:
+                continue
+            try:
+                self._client.caches.delete(name=record.name)
+            except Exception:
+                continue
+        self._context_caches.clear()
+
+    # ------------------------------------------------------------------
+    # Request plumbing
+    # ------------------------------------------------------------------
 
     def _generate_for_file(
         self,
@@ -230,7 +501,7 @@ when no candidate fits, and "needs_review" when evidence is too weak.
         if cached and cached.sha256 == file_record.sha256 and cached.expires_at > now:
             return self._client.files.get(name=cached.name)
 
-        uploaded = self._client.files.upload(file=path)
+        uploaded = self._wait_until_active(self._client.files.upload(file=path))
         uploaded_at = now
         expires_at = uploaded_at + timedelta(hours=47)
         self.upload_cache[file_record.path] = GeminiFileRecord(
@@ -244,6 +515,21 @@ when no candidate fits, and "needs_review" when evidence is too weak.
         )
         return uploaded
 
+    def _wait_until_active(self, uploaded: Any) -> Any:
+        """Give the Files API time to finish processing a freshly uploaded document."""
+        name = getattr(uploaded, "name", "")
+        if not name:
+            return uploaded
+        deadline = time.monotonic() + FILE_ACTIVATION_TIMEOUT_SECONDS
+        current = uploaded
+        while _file_state(current) == "PROCESSING" and time.monotonic() < deadline:
+            time.sleep(FILE_POLL_SECONDS)
+            try:
+                current = self._client.files.get(name=name)
+            except Exception:
+                return current
+        return current
+
     def _record_for_existing_path(self, root: Path, relative_path: str) -> FileRecord:
         path = root / relative_path
         stat = path.stat()
@@ -256,13 +542,19 @@ when no candidate fits, and "needs_review" when evidence is too weak.
             sha256=hash_file(path),
         )
 
-    def _generate_json(self, contents: Any, schema: type[T]) -> T:
+    def _generate_json(
+        self,
+        contents: Any,
+        schema: type[T],
+        cached_content: str | None = None,
+    ) -> T:
         try:
             config = self._types.GenerateContentConfig(
                 responseMimeType="application/json",
                 responseSchema=schema,
                 temperature=DEFAULT_TEMPERATURE,
                 thinkingConfig=self._thinking_config(),
+                cachedContent=cached_content,
             )
             response = self._client.models.generate_content(
                 model=self.model,
@@ -270,15 +562,18 @@ when no candidate fits, and "needs_review" when evidence is too weak.
                 config=config,
             )
         except TypeError:
+            config = {
+                "response_mime_type": "application/json",
+                "response_schema": schema.model_json_schema(),
+                "temperature": DEFAULT_TEMPERATURE,
+                "thinking_config": {"thinking_level": self.thinking_level},
+            }
+            if cached_content:
+                config["cached_content"] = cached_content
             response = self._client.models.generate_content(
                 model=self.model,
                 contents=contents,
-                config={
-                    "response_mime_type": "application/json",
-                    "response_schema": schema.model_json_schema(),
-                    "temperature": DEFAULT_TEMPERATURE,
-                    "thinking_config": {"thinking_level": self.thinking_level},
-                },
+                config=config,
             )
         except Exception as exc:
             raise GeminiError(f"Gemini request failed: {exc}") from exc
@@ -293,11 +588,12 @@ when no candidate fits, and "needs_review" when evidence is too weak.
             except Exception as json_exc:
                 raise GeminiError(f"Gemini returned invalid structured output: {json_exc}") from exc
 
-    def _generate_text(self, contents: Any) -> str:
+    def _generate_text(self, contents: Any, cached_content: str | None = None) -> str:
         try:
             config = self._types.GenerateContentConfig(
                 temperature=DEFAULT_TEMPERATURE,
                 thinkingConfig=self._thinking_config(),
+                cachedContent=cached_content,
             )
             response = self._client.models.generate_content(
                 model=self.model,
@@ -305,13 +601,16 @@ when no candidate fits, and "needs_review" when evidence is too weak.
                 config=config,
             )
         except TypeError:
+            config = {
+                "temperature": DEFAULT_TEMPERATURE,
+                "thinking_config": {"thinking_level": self.thinking_level},
+            }
+            if cached_content:
+                config["cached_content"] = cached_content
             response = self._client.models.generate_content(
                 model=self.model,
                 contents=contents,
-                config={
-                    "temperature": DEFAULT_TEMPERATURE,
-                    "thinking_config": {"thinking_level": self.thinking_level},
-                },
+                config=config,
             )
         except Exception as exc:
             raise GeminiError(f"Gemini request failed: {exc}") from exc
@@ -319,7 +618,7 @@ when no candidate fits, and "needs_review" when evidence is too weak.
         text = getattr(response, "text", "") or ""
         self._record_usage(response)
         if not text.strip():
-            raise GeminiError("Gemini returned an empty checklist response.")
+            raise GeminiError("Gemini returned an empty response.")
         return text
 
     def _thinking_config(self):
@@ -335,11 +634,17 @@ when no candidate fits, and "needs_review" when evidence is too weak.
         for target, source in (
             ("prompt_tokens", "prompt_token_count"),
             ("output_tokens", "candidates_token_count"),
+            ("cached_tokens", "cached_content_token_count"),
             ("total_tokens", "total_token_count"),
         ):
             value = getattr(metadata, source, 0) or 0
             if isinstance(value, int) and value >= 0:
                 self.usage[target] += value
+
+
+def _file_state(uploaded: Any) -> str:
+    state = getattr(uploaded, "state", None)
+    return str(getattr(state, "name", state) or "").upper()
 
 
 def fallback_classification(file_record: FileRecord, reason: str) -> DocumentClassification:
@@ -360,57 +665,228 @@ def normalize_thinking_level(value: str) -> str:
     return normalized
 
 
-def build_deviation_checklist_prompt(
-    guide: DeviationGuide,
-    study: StudyMapEntry | None = None,
-) -> str:
-    target = ""
-    if study is not None:
-        target = f"""
-Target study metadata:
-{study.model_dump_json(indent=2)}
-"""
-    return f"""
-{build_deviation_system_prompt(guide)}
-
-{target}
-
-convert this guide into a concise audit checklist, including checks for outliers,
-analysis specifications, thresholds, and every other category in the guide.
-When a target study and preregistration are attached, make each item concrete and
-document-derived. Return only the checklist. Do not evaluate a study yet.
-"""
+def dedupe_notes(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        cleaned = value.strip()
+        if cleaned and cleaned not in seen:
+            result.append(cleaned)
+            seen.add(cleaned)
+    return result
 
 
-def build_deviation_prompt(
+# ----------------------------------------------------------------------
+# Stage prompts
+# ----------------------------------------------------------------------
+
+
+def _guide_header(guide: DeviationGuide, include_guide: bool) -> str:
+    """The guide is in the context cache when one exists, so only inline it otherwise."""
+    return build_deviation_system_prompt(guide) if include_guide else ""
+
+
+def _category_line() -> str:
+    return ", ".join(INVENTORY_CATEGORIES)
+
+
+def build_preregistration_inventory_prompt(
     guide: DeviationGuide,
     study: StudyMapEntry,
-    checklist: str = "",
+    include_guide: bool = True,
 ) -> str:
-    checklist_section = ""
-    if checklist.strip():
-        checklist_section = f"""
-Internal checklist prepared from the guide:
-{checklist.strip()}
-"""
     return f"""
-{build_deviation_system_prompt(guide)}
+{_guide_header(guide, include_guide)}
 
-{checklist_section}
+Stage 1 of 4: inventory the preregistration.
 
 Target study metadata:
 {study.model_dump_json(indent=2)}
 
-Evaluate the attached article and preregistration for this target study only.
+Read the attached preregistration ({study.matched_preregistration_file_path}) and
+list every commitment the researchers made about what they would do and how they
+would do it. Cover hypotheses, sample size and stopping rules, exclusion and
+outlier rules, measures and how they will be scored, outcome definitions,
+analysis models and their predictors and covariates, transformations, correction
+procedures, and any other decision rule.
 
-Work in two passes:
-Pass 1 — For each item in the preregistration, verify whether the article implements it as specified. Flag any that differ or that the preregistration left underspecified.
-Pass 2 — For each analysis, test, exclusion rule, or decision reported in the article, verify whether it appears in the preregistration. Flag anything in the article that is not clearly preregistered.
+For each item:
+- item_id: a stable identifier of the form P1, P2, P3, in document order.
+- category: one of {_category_line()}.
+- statement: what the researchers said they would do, in one sentence.
+- specification: the concrete detail given — exact thresholds, model terms,
+  cutoffs, instruments, numbers. Write "none given" when the preregistration
+  states the intent without the detail.
+- specificity: fully_specified when a reader could execute it exactly one way,
+  partially_specified when some detail is given but choices remain open, and
+  unspecified when only the intent is stated.
+- location: the section or page of the preregistration.
+- quote: a short verbatim quote carrying the commitment.
 
-Both passes are required. There may be multiple findings of the same deviation_type — report every instance you find. Do not stop after identifying one example of a type.
+Inventory only. Do not look for problems, do not compare against any article, and
+do not evaluate whether the plan was followed. Split compound sentences into
+separate items when they commit to separate things. Use notes for anything that
+was unreadable or ambiguous in the document itself.
 
-Return JSON matching the requested schema, using only deviation_type values from
-the guide. Set study_id, study_label, article_file_path, and
-preregistration_file_path exactly as provided in the target study metadata.
-Set apa_citation to the full APA 7th edition citation for the article.
+Return JSON matching the requested schema.
+"""
+
+
+def build_article_inventory_prompt(
+    guide: DeviationGuide,
+    study: StudyMapEntry,
+    supplement_paths: list[str],
+    include_guide: bool = True,
+) -> str:
+    supplements = "\n".join(f"- {path}" for path in supplement_paths) or "- none"
+    return f"""
+{_guide_header(guide, include_guide)}
+
+Stage 2 of 4: inventory what the researchers actually did.
+
+Target study metadata:
+{study.model_dump_json(indent=2)}
+
+Attached documents:
+- Article: {study.article_file_path}
+- Supplemental materials:
+{supplements}
+
+Read the article and every supplemental document, and list everything the
+researchers report actually doing for this study only. Cover the hypotheses they
+say they tested, the sample they collected and analysed, every exclusion they
+applied, every measure and how it was scored, every outcome they report, every
+statistical model they ran including its predictors and covariates, every
+transformation, and every correction procedure. Include analyses that appear only
+in a supplement, a footnote, a table, or a figure note.
+
+For each item:
+- item_id: a stable identifier of the form A1, A2, A3, in reading order.
+- category: one of {_category_line()}.
+- statement: what the researchers did, in one sentence.
+- specification: the concrete detail as executed — realised sample sizes, exact
+  cutoffs applied, model terms, software or package, numbers reported.
+- framing: confirmatory when the article presents it as planned, preregistered,
+  primary, or hypothesis-testing; exploratory when the article labels it
+  exploratory, post-hoc, or unplanned; robustness when it is presented as a
+  sensitivity or robustness check; unclear when the article does not say.
+- source_file_path: the file the item came from.
+- location: the section, table, or page.
+- quote: a short verbatim quote.
+
+Inventory only. Do not compare against the preregistration and do not judge
+anything. Where the article reports a sample size in an analysis that differs
+from the sample size in the methods section, record both as separate items.
+
+Return JSON matching the requested schema.
+"""
+
+
+def build_inventory_diff_prompt(
+    guide: DeviationGuide,
+    study: StudyMapEntry,
+    prereg_inventory: PreregistrationInventory,
+    article_inventory: ArticleInventory,
+    include_guide: bool = True,
+) -> str:
+    allowed_types = ", ".join(guide.allowed_deviation_type_ids)
+    return f"""
+{_guide_header(guide, include_guide)}
+
+Stage 3 of 4: diff the two inventories.
+
+Target study metadata:
+{study.model_dump_json(indent=2)}
+
+Preregistration inventory (stage 1):
+{prereg_inventory.model_dump_json(indent=2)}
+
+Article and supplement inventory (stage 2):
+{article_inventory.model_dump_json(indent=2)}
+
+Align the two inventories item by item and return three separate lists. The
+attached documents are available; consult them to confirm evidence before you
+report an item, and drop any item the documents contradict.
+
+1. missing_preregistered_items — preregistered items with no counterpart anywhere
+   in the article or supplements. For each, set prereg_item_id, category, the
+   preregistered_plan, searched_for describing where you looked for it, evidence,
+   disclosed for whether the article acknowledges dropping it, and confidence.
+
+2. unregistered_article_items — reported items with no counterpart in the
+   preregistration. For each, set article_item_id, category, the article_report,
+   framing copied from the stage 2 item, evidence, disclosed for whether the
+   article labels it exploratory or unplanned, and confidence.
+
+3. deviations — items present in both inventories but executed differently from
+   the plan. For each, set prereg_item_id and article_item_id, a deviation_type
+   from {allowed_types}, summary, preregistered_plan, article_report, evidence
+   citing both documents, confidence, disclosed, explanation_given, and
+   robustness_check.
+
+An item counts as matched when it is the same commitment, even if the wording
+differs. A matched pair executed exactly as planned belongs in none of the three
+lists. Report every instance you find; there may be several of the same
+deviation_type. Do not report an item in more than one list.
+
+Set summary to a factual one-paragraph statement of what the diff found, and
+overall_assessment to a short evidence-based assessment. State only what the
+documents show; do not infer intent and do not judge whether the researchers did
+a good or bad job.
+
+Return JSON matching the requested schema.
+"""
+
+
+def build_degrees_of_freedom_prompt(
+    guide: DeviationGuide,
+    study: StudyMapEntry,
+    prereg_inventory: PreregistrationInventory,
+    article_inventory: ArticleInventory,
+    include_guide: bool = True,
+) -> str:
+    return f"""
+{_guide_header(guide, include_guide)}
+
+Stage 4 of 4: audit the preregistration for researcher degrees of freedom.
+
+Target study metadata:
+{study.model_dump_json(indent=2)}
+
+Preregistration inventory (stage 1):
+{prereg_inventory.model_dump_json(indent=2)}
+
+Article and supplement inventory (stage 2), for context only:
+{article_inventory.model_dump_json(indent=2)}
+
+Work through the preregistration inventory. Report every item that is
+underspecified in a way that leaves the researchers a choice which could
+plausibly change the results. Start with the items marked partially_specified or
+unspecified, then check the fully_specified items for detail that only looks
+precise.
+
+Typical cases: an outlier rule with no definition or cutoff; an analysis named
+without its predictors, covariates, or interaction terms; a measure without its
+scoring or aggregation rule; a target sample size with no stopping rule; a
+correction procedure named without the family it applies to; a procedure named
+only by citation without the metric or threshold it implies; a numeric choice
+stated without justification, so a different number would have been equally
+defensible.
+
+For each finding:
+- prereg_item_id and category: copied from the stage 1 item.
+- preregistered_plan: what the preregistration actually says.
+- underspecification: precisely which decision is left open.
+- plausible_alternatives: the defensible choices the wording still permits.
+- article_choice: which one the article took, or "not reported".
+- potential_impact: how the open choice could move the reported result.
+- evidence: the preregistration location and quote.
+- severity: high when the open choice could plausibly flip a reported
+  conclusion, medium when it could move an estimate materially, low otherwise.
+
+Judge the preregistration as written, not the researchers. An item is a finding
+because the wording permits more than one defensible result, whether or not the
+article exploits it. Do not report items that are fully pinned down.
+
+Return JSON matching the requested schema.
 """

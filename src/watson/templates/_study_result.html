@@ -12,16 +12,63 @@
       {% if item.article_location %}<div><dt>Article location</dt><dd>{{ item.article_location }}</dd></div>{% endif %}
       {% if item.preregistered %}<div><dt>Article says preregistered</dt><dd>{{ item.preregistered }}</dd></div>{% endif %}
       {% if item.preregistration_file_path %}<div><dt>Preregistration</dt><dd>{{ item.preregistration_file_path }}</dd></div>{% endif %}
+      {% if item.supplemental_file_paths %}<div><dt>Supplements</dt><dd>{{ item.supplemental_file_paths|join(', ') }}</dd></div>{% endif %}
       {% if item.match_confidence is defined %}<div><dt>Match confidence</dt><dd>{{ (item.match_confidence * 100)|round|int }}%</dd></div>{% endif %}
+      {% if item.coverage and item.coverage.prereg_items %}<div><dt>Inventoried</dt><dd>{{ item.coverage.prereg_items }} preregistered commitment{% if item.coverage.prereg_items != 1 %}s{% endif %} ({{ item.coverage.underspecified }} not fully specified) · {{ item.coverage.article_items }} reported action{% if item.coverage.article_items != 1 %}s{% endif %}</dd></div>{% endif %}
     </dl>
     {% if item.rationale %}<div class="assessment"><h4>Match rationale</h4><p>{{ item.rationale }}</p></div>{% endif %}
     {% if item.detail %}<div class="assessment"><h4>Overall assessment</h4><p>{{ item.detail }}</p></div>{% endif %}
     {% if item.error %}<div class="alert" data-variant="destructive"><section><p>{{ item.error }}</p></section></div>{% endif %}
+    {% if item.stage_errors %}<div class="alert" data-variant="destructive"><section><ul>{% for note in item.stage_errors %}<li>{{ note }}</li>{% endfor %}</ul></section></div>{% endif %}
     {% if item.review_notes %}<div class="inline-notes"><h4>Review notes</h4><ul>{% for note in item.review_notes %}<li>{{ note }}</li>{% endfor %}</ul></div>{% endif %}
+
+    {% if item.missing_items %}
+    <h4 class="finding-section-title">1. Missing preregistered items <span class="finding-count">{{ item.missing_items|length }}</span></h4>
+    <div class="finding-list">
+      {% for finding in item.missing_items %}
+      <article class="finding-card" data-section="missing">
+        <header>
+          <span>Missing {{ finding.number }}{% if finding.prereg_item_id %} · {{ finding.prereg_item_id }}{% endif %}</span>
+          <h4>{{ finding.category|replace('_', ' ')|title }}</h4>
+          {% if finding.confidence %}<span class="confidence">{{ finding.confidence }} confidence</span>{% endif %}
+        </header>
+        <p class="finding-summary">{{ finding.preregistered_plan or 'Not reported' }}</p>
+        {% if finding.searched_for %}<section class="finding-evidence"><h5>Where Watson looked</h5><p>{{ finding.searched_for }}</p></section>{% endif %}
+        <section class="finding-evidence"><h5>Evidence</h5><p>{{ finding.evidence or 'No evidence text was returned.' }}</p></section>
+        <dl class="finding-flags">
+          <div><dt>Disclosed</dt><dd>{{ finding.disclosed or 'Not reported' }}</dd></div>
+        </dl>
+      </article>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if item.unregistered_items %}
+    <h4 class="finding-section-title">2. Reported but not preregistered <span class="finding-count">{{ item.unregistered_items|length }}</span></h4>
+    <div class="finding-list">
+      {% for finding in item.unregistered_items %}
+      <article class="finding-card" data-section="unregistered">
+        <header>
+          <span>Unregistered {{ finding.number }}{% if finding.article_item_id %} · {{ finding.article_item_id }}{% endif %}</span>
+          <h4>{{ finding.category|replace('_', ' ')|title }}</h4>
+          {% if finding.confidence %}<span class="confidence">{{ finding.confidence }} confidence</span>{% endif %}
+        </header>
+        <p class="finding-summary">{{ finding.article_report or 'Not reported' }}</p>
+        <section class="finding-evidence"><h5>Evidence</h5><p>{{ finding.evidence or 'No evidence text was returned.' }}</p></section>
+        <dl class="finding-flags">
+          <div><dt>Framing in the article</dt><dd>{{ finding.framing or 'Not reported' }}</dd></div>
+          <div><dt>Disclosed as unplanned</dt><dd>{{ finding.disclosed or 'Not reported' }}</dd></div>
+        </dl>
+      </article>
+      {% endfor %}
+    </div>
+    {% endif %}
+
     {% if item.findings %}
+    <h4 class="finding-section-title">3. Deviations <span class="finding-count">{{ item.findings|length }}</span></h4>
     <div class="finding-list">
       {% for finding in item.findings %}
-      <article class="finding-card">
+      <article class="finding-card" data-section="deviation">
         <header>
           <span>Finding {{ finding.number }}</span>
           <h4>{{ finding.deviation_type|replace('_', ' ')|title }}</h4>
@@ -41,6 +88,33 @@
       </article>
       {% endfor %}
     </div>
-    {% elif item.deviations == 0 %}<p class="no-findings">No structured findings were returned for this study.</p>{% endif %}
+    {% endif %}
+
+    {% if item.degrees_of_freedom %}
+    <h4 class="finding-section-title">4. Preregistration degrees of freedom <span class="finding-count">{{ item.degrees_of_freedom|length }}</span></h4>
+    <div class="finding-list">
+      {% for finding in item.degrees_of_freedom %}
+      <article class="finding-card" data-section="degree-of-freedom">
+        <header>
+          <span>Degree of freedom {{ finding.number }}{% if finding.prereg_item_id %} · {{ finding.prereg_item_id }}{% endif %}</span>
+          <h4>{{ finding.category|replace('_', ' ')|title }}</h4>
+          {% if finding.severity %}<span class="confidence">{{ finding.severity }} severity</span>{% endif %}
+        </header>
+        <p class="finding-summary">{{ finding.underspecification or 'Not reported' }}</p>
+        <div class="finding-comparison">
+          <section><h5>Preregistered plan</h5><p>{{ finding.preregistered_plan or 'Not reported' }}</p></section>
+          <section><h5>What the article did</h5><p>{{ finding.article_choice or 'Not reported' }}</p></section>
+        </div>
+        <section class="finding-evidence"><h5>Evidence</h5><p>{{ finding.evidence or 'No evidence text was returned.' }}</p></section>
+        <dl class="finding-flags">
+          <div><dt>Defensible alternatives</dt><dd>{{ finding.plausible_alternatives or 'Not reported' }}</dd></div>
+          <div><dt>Potential impact</dt><dd>{{ finding.potential_impact or 'Not reported' }}</dd></div>
+        </dl>
+      </article>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if item.deviations == 0 %}<p class="no-findings">No structured findings were returned for this study.</p>{% endif %}
   </div>
 </details>
