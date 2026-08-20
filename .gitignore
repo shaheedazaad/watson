@@ -11,5 +11,6 @@ __pycache__/
 watson-inventory-report.md
 dist/
 build/
+site/
 *.egg-info/
 overhaul.md

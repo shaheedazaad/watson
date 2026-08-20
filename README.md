@@ -1,5 +1,7 @@
 # Watson
 
+> **[Read the full documentation →](https://shaheedazaad.github.io/watson/)** for a guided walkthrough with screenshots, aimed at researchers rather than developers.
+
 Watson is a private, local browser app for organizing psychology research materials and reviewing preregistration adherence. Source documents and generated results stay on the computer. Watson sends document content to the configured Gemini model only when the user starts processing.
 
 ## Install

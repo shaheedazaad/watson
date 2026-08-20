@@ -1,0 +1,31 @@
+site_name: Watson
+site_description: Organize psychology research materials and check preregistration adherence, entirely on your own computer.
+site_url: https://shaheedazaad.github.io/watson/
+repo_url: https://github.com/shaheedazaad/watson
+repo_name: shaheedazaad/watson
+edit_uri: edit/main/docs/
+
+theme:
+  name: shadcn
+  show_stargazers: true
+  accent: "oklch(0.4 0.075 45)"
+
+extra_css:
+  - assets/css/watson-theme.css
+
+nav:
+  - Welcome: index.md
+  - Getting started: quickstart.md
+  - The preregistration check: preregistration-check.md
+  - Privacy and API keys: privacy.md
+  - Command line (advanced): cli.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
