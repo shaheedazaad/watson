@@ -1,7 +1,7 @@
 <details class="study-result" id="{{ item.anchor }}">
   <summary>
     <span class="study-result-main"><strong>{{ item.label }}</strong><small>{{ item.detail or 'No narrative assessment was returned.' }}</small></span>
-    <span class="status {{ item.status }}">{{ item.status }}</span>
+    <span class="badge status {{ item.status }}">{{ item.status }}</span>
     {% if item.deviations is not none %}<span class="finding-count">{{ item.deviations }} finding{% if item.deviations != 1 %}s{% endif %}</span>{% endif %}
     <span class="disclosure-arrow" aria-hidden="true">⌄</span>
   </summary>
@@ -16,7 +16,7 @@
     </dl>
     {% if item.rationale %}<div class="assessment"><h4>Match rationale</h4><p>{{ item.rationale }}</p></div>{% endif %}
     {% if item.detail %}<div class="assessment"><h4>Overall assessment</h4><p>{{ item.detail }}</p></div>{% endif %}
-    {% if item.error %}<div class="flash error">{{ item.error }}</div>{% endif %}
+    {% if item.error %}<div class="alert" data-variant="destructive"><section><p>{{ item.error }}</p></section></div>{% endif %}
     {% if item.review_notes %}<div class="inline-notes"><h4>Review notes</h4><ul>{% for note in item.review_notes %}<li>{{ note }}</li>{% endfor %}</ul></div>{% endif %}
     {% if item.findings %}
     <div class="finding-list">

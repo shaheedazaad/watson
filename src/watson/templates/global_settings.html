@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Settings · Watson{% endblock %}
+{% block content %}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <ol>
+    <li><a href="{{ url() }}">Projects</a></li>
+    <li aria-hidden="true"><span>/</span></li>
+    <li aria-current="page"><span>Settings</span></li>
+  </ol>
+</nav>
+<div class="page-heading"><div><h1 class="page-title">Settings</h1><p class="lede">These apply to every Watson project on this computer.</p></div></div>
+{% if notice %}<div class="alert alert-success" role="status"><section><p>{{ notice }}</p></section></div>{% endif %}
+{% if error %}<div class="alert" data-variant="destructive" role="alert"><section><p>{{ error }}</p></section></div>{% endif %}
+
+<div class="settings-grid">
+  <form class="settings-form" action="{{ url('settings') }}" method="post">
+    <div><h2>Processing</h2><p class="muted">Applies the next time any project runs.</p></div>
+
+    <div class="field">
+      <label for="settings-model">Gemini model</label>
+      <input id="settings-model" class="input" name="model" value="{{ model }}" maxlength="200" required>
+      <p>Editable for preview or custom model identifiers.</p>
+    </div>
+
+    <div class="field">
+      <label for="settings-thinking">Reasoning effort</label>
+      <select id="settings-thinking" class="select" name="thinking_level">
+        {% for value in ['minimal', 'low', 'medium', 'high'] %}<option value="{{ value }}" {% if thinking_level == value %}selected{% endif %}>{{ value|capitalize }}</option>{% endfor %}
+      </select>
+      <p>Higher levels may take longer and use more resources.</p>
+    </div>
+
+    <button class="btn" type="submit">Save settings</button>
+  </form>
+
+  <details class="settings-form" open>
+    <summary>Gemini credential
+      {% if credential_state.session_loaded %}<span class="badge status complete">ready this session</span>
+      {% elif credential_state.has_legacy_key %}<span class="badge status running">migration available</span>
+      {% elif credential_state.has_saved_key %}<span class="badge status running">not loaded</span>
+      {% else %}<span class="badge status failed">not configured</span>{% endif %}
+    </summary>
+    <p class="muted">Watson never accesses {{ credential_store_name }} during launch, page loads, updates, or processing. Only the clearly labelled actions below can read, write, or delete the saved key. The key is held in memory after an explicit save or load and disappears when Watson closes.</p>
+
+    {% if credential_state.has_legacy_key %}
+    <div class="alert alert-warning"><section><p>An API key from an earlier Watson version is still in the old local file vault. Watson will not load it into the session or migrate it automatically.</p></section></div>
+    <form action="{{ url('credentials/migrate') }}" method="post">
+      <button class="btn" type="submit">Move old key to {{ credential_store_name }}</button>
+      <p class="action-note">Explicit action: reads the old vault, writes {{ credential_store_name }}, then removes the old vault. Your operating system may ask you to approve access.</p>
+    </form>
+    <form action="{{ url('credentials/delete-legacy') }}" method="post">
+      <button class="btn text-danger" data-variant="ghost" type="submit">Delete old file-vault key</button>
+    </form>
+    {% endif %}
+
+    {% if credential_state.has_saved_key and not credential_state.session_loaded %}
+    <div class="alert alert-warning"><section><p>A key is recorded as saved, but Watson has not accessed it in this session. After an update, use this explicit reconnect step; your operating system may ask you to approve access again.</p></section></div>
+    <form action="{{ url('credentials/load') }}" method="post">
+      <button class="btn" type="submit">Load from {{ credential_store_name }} for this session</button>
+      <p class="action-note">Explicit credential-store read: this is the only action that loads an already-saved key.</p>
+    </form>
+    {% elif credential_state.session_loaded %}
+    <div class="alert alert-success"><section><p>The API key is available in memory for this Watson session.</p></section></div>
+    <form action="{{ url('credentials/forget') }}" method="post">
+      <button class="btn" data-variant="outline" type="submit">Remove key from this session</button>
+      <p class="action-note">Does not access or delete the saved Keychain item.</p>
+    </form>
+    {% endif %}
+
+    <form action="{{ url('credentials') }}" method="post">
+      <div class="field">
+        <label for="settings-api-key">{% if credential_state.has_saved_key %}Replace{% else %}Add{% endif %} Gemini API key</label>
+        <input id="settings-api-key" class="input" type="password" name="api_key" autocomplete="off" placeholder="Paste a new key" required>
+      </div>
+      <button class="btn" type="submit">Save to {{ credential_store_name }}</button>
+      <p class="action-note">Explicit credential-store write: saving also loads the new key into this session. Your operating system may ask you to approve access.</p>
+    </form>
+    {% if credential_state.has_saved_key %}
+    <form action="{{ url('credentials/delete') }}" method="post">
+      <button class="btn text-danger" data-variant="ghost" type="submit">Delete from {{ credential_store_name }}</button>
+      <p class="action-note">Explicit credential-store delete; your operating system may ask you to approve access.</p>
+    </form>
+    {% endif %}
+  </details>
+</div>
+{% endblock %}

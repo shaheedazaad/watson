@@ -14,8 +14,6 @@ from typing import BinaryIO
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from watson.file_support import supported_extensions
-from watson.gemini_client import DEFAULT_MODEL
-from watson.config import DEFAULT_THINKING_LEVEL, THINKING_LEVEL_OPTIONS
 
 
 PROJECTS_DIRNAME = "projects"
@@ -45,27 +43,11 @@ def get_app_data_dir() -> Path:
 
 
 class ProjectSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # "ignore" tolerates older settings.json files that still carry the
+    # model/thinking_level fields now stored globally in ConfigStore.
+    model_config = ConfigDict(extra="ignore")
 
-    model: str = DEFAULT_MODEL
-    thinking_level: str = DEFAULT_THINKING_LEVEL
     file_context: str = ""
-
-    @field_validator("model")
-    @classmethod
-    def validate_model(cls, value: str) -> str:
-        value = value.strip()
-        if not value or len(value) > 200 or any(ord(character) < 32 for character in value):
-            raise ValueError("Model must be a non-empty identifier of at most 200 characters.")
-        return value
-
-    @field_validator("thinking_level")
-    @classmethod
-    def validate_thinking_level(cls, value: str) -> str:
-        value = value.strip().lower()
-        if value not in THINKING_LEVEL_OPTIONS:
-            raise ValueError(f"Thinking level must be one of: {', '.join(THINKING_LEVEL_OPTIONS)}")
-        return value
 
     @field_validator("file_context")
     @classmethod
@@ -201,11 +183,7 @@ class ProjectStore:
     ) -> bool:
         paths = self.paths(project_id)
         previous = self.get_settings(project_id)
-        changed_processing = (
-            previous.model != settings.model
-            or previous.thinking_level != settings.thinking_level
-            or previous.file_context != settings.file_context
-        )
+        changed_processing = previous.file_context != settings.file_context
         has_outputs = any(paths.outputs.iterdir()) or (paths.state / "inventory.json").exists()
         if changed_processing and has_outputs and not confirm_invalidation:
             raise SettingsInvalidationRequired(
@@ -332,6 +310,19 @@ class ProjectStore:
         metadata = self.get(project_id)
         metadata.updated_at = utc_now()
         _write_json(paths.metadata, metadata.model_dump(mode="json"))
+
+    def rename(self, project_id: str, name: str) -> ProjectMetadata:
+        normalized_name = validate_project_name(name)
+        paths = self.paths(project_id)
+        metadata = self.get(project_id)
+        metadata.name = normalized_name
+        metadata.updated_at = utc_now()
+        _write_json(paths.metadata, metadata.model_dump(mode="json"))
+        return metadata
+
+    def delete(self, project_id: str) -> None:
+        paths = self.paths(project_id)
+        shutil.rmtree(paths.root)
 
 
 def validate_project_name(name: str) -> str:

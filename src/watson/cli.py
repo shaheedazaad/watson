@@ -16,6 +16,7 @@ from watson.deviation_guide import (
     build_deviation_system_prompt,
     load_deviation_guide,
 )
+from watson.gemini_client import DEFAULT_MODEL
 from watson.projects import ProjectError, ProjectStore
 from watson.jobs import redact
 from watson.runner import NullProgress, RunnerSettings, run_project
@@ -62,10 +63,11 @@ def run_headless(
     store = ProjectStore(data_dir)
     paths = store.paths(project_id)
     saved = store.get_settings(project_id)
+    config = ConfigStore(store.data_dir)
     api_key = os.environ.get(api_key_env)
     if not api_key and use_keychain:
         try:
-            api_key = ConfigStore(store.data_dir).load_api_key_from_keychain()
+            api_key = config.load_api_key_from_keychain()
         except CredentialStoreError as exc:
             raise typer.BadParameter(str(exc)) from exc
     if not api_key:
@@ -75,8 +77,8 @@ def run_headless(
         )
     settings = RunnerSettings(
         action=action,
-        model=saved.model,
-        thinking_level=saved.thinking_level,
+        model=config.get_default_model(DEFAULT_MODEL),
+        thinking_level=config.get_thinking_level(),
         api_key=api_key,
         retry_mode="all" if retry_all else "failed",
         file_context=saved.file_context,

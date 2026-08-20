@@ -35,6 +35,7 @@ def test_navigation_never_accesses_system_credentials(
                 f"/{TOKEN}/projects/{project.id}/settings",
                 headers={"host": "127.0.0.1"},
             ),
+            client.get(f"/{TOKEN}/settings", headers={"host": "127.0.0.1"}),
         ]
         run_attempt = client.post(
             f"/{TOKEN}/projects/{project.id}/runs",
@@ -68,18 +69,16 @@ def test_keychain_read_requires_explicit_load_action(
 
     monkeypatch.setattr(config_module, "_credential_backend", lambda: Backend())
     app = create_app(token=TOKEN, data_dir=tmp_path)
-    project = app.state.project_store.create("Explicit credential access")
     app.state.config.write_config({"gemini_api_key_storage": "keychain"})
 
     with TestClient(app) as client:
         settings = client.get(
-            f"/{TOKEN}/projects/{project.id}/settings",
+            f"/{TOKEN}/settings",
             headers={"host": "127.0.0.1"},
         )
         assert calls == []
         loaded = client.post(
             f"/{TOKEN}/credentials/load",
-            data={"project_id": project.id},
             headers={"host": "127.0.0.1"},
             follow_redirects=False,
         )
@@ -87,6 +86,7 @@ def test_keychain_read_requires_explicit_load_action(
     assert settings.status_code == 200
     assert "Load from" in settings.text
     assert loaded.status_code == 303
+    assert "/settings" in loaded.headers["location"]
     assert calls == ["get"]
     assert app.state.config.get_session_api_key() == "explicit-secret"
 
@@ -184,6 +184,59 @@ def test_create_upload_refresh_and_download_flow(tmp_path: Path) -> None:
     assert "data-dropzone" in refreshed.text
     assert "data-file-picker" in refreshed.text
     assert "Drop files here" in refreshed.text
+
+
+def test_global_settings_are_shared_across_projects(tmp_path: Path) -> None:
+    app = create_app(token=TOKEN, data_dir=tmp_path)
+    with TestClient(app) as client:
+        saved = client.post(
+            f"/{TOKEN}/settings",
+            data={"model": "gemini-custom", "thinking_level": "medium"},
+            headers={"host": "127.0.0.1"},
+            follow_redirects=False,
+        )
+        page = client.get(f"/{TOKEN}/settings", headers={"host": "127.0.0.1"})
+
+    assert saved.status_code == 303
+    assert page.status_code == 200
+    assert "gemini-custom" in page.text
+    assert 'value="medium" selected' in page.text.replace("\n", " ")
+
+
+def test_rename_clear_output_and_delete_project(tmp_path: Path) -> None:
+    app = create_app(token=TOKEN, data_dir=tmp_path)
+    project = app.state.project_store.create("Original name")
+    paths = app.state.project_store.paths(project.id)
+    (paths.state / "inventory.json").write_text("{}", encoding="utf-8")
+    (paths.outputs / "watson-inventory-report.md").write_text("# report", encoding="utf-8")
+
+    with TestClient(app) as client:
+        renamed = client.post(
+            f"/{TOKEN}/projects/{project.id}/rename",
+            data={"name": "Renamed project"},
+            headers={"host": "127.0.0.1"},
+            follow_redirects=False,
+        )
+        project_page = client.get(f"/{TOKEN}/projects/{project.id}", headers={"host": "127.0.0.1"})
+        cleared = client.post(
+            f"/{TOKEN}/projects/{project.id}/clear-output",
+            headers={"host": "127.0.0.1"},
+            follow_redirects=False,
+        )
+        deleted = client.post(
+            f"/{TOKEN}/projects/{project.id}/delete",
+            headers={"host": "127.0.0.1"},
+            follow_redirects=False,
+        )
+        gone = client.get(f"/{TOKEN}/projects/{project.id}", headers={"host": "127.0.0.1"})
+
+    assert renamed.status_code == 303
+    assert "Renamed project" in project_page.text
+    assert cleared.status_code == 303
+    assert not (paths.state / "inventory.json").exists()
+    assert deleted.status_code == 303
+    assert not paths.root.exists()
+    assert gone.status_code == 404
 
 
 def test_missing_projects_and_unsafe_downloads_do_not_leak_paths(tmp_path: Path) -> None:

@@ -1,33 +1,52 @@
 {% extends "base.html" %}
 {% block title %}{{ report.title }} · {{ project.name }} · Watson{% endblock %}
 {% block content %}
-<nav class="breadcrumbs"><a href="{{ url() }}">Projects</a><span>/</span><a href="{{ url('projects/' + project.id) }}">{{ project.name }}</a><span>/</span><span>{{ report.title }}</span></nav>
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <ol>
+    <li><a href="{{ url() }}">Projects</a></li>
+    <li aria-hidden="true"><span>/</span></li>
+    <li><a href="{{ url('projects/' + project.id) }}">{{ project.name }}</a></li>
+    <li aria-hidden="true"><span>/</span></li>
+    <li aria-current="page"><span>{{ report.title }}</span></li>
+  </ol>
+</nav>
 <nav class="report-tabs" aria-label="Available reports">{% for available in available_reports %}<a class="{% if available.kind == report.kind %}active{% endif %}" href="{{ url('projects/' + project.id + '/reports/' + available.kind) }}">{{ available.label|replace('Read ', '') }}</a>{% endfor %}</nav>
 
-<div class="page-heading report-heading">
-  <div><p class="eyebrow">Browser report</p><h1>{{ report.title }}</h1><p class="lede">{{ report.summary }}</p></div>
-  <div class="header-actions"><a class="button quiet" href="{{ url('projects/' + project.id) }}">Back to project</a><a class="button primary" href="{{ url('projects/' + project.id + '/downloads/' + report.download) }}">Download Markdown</a></div>
+<div class="page-heading">
+  <div><h1 class="page-title">{{ report.title }}</h1><p class="lede">{{ report.summary }}</p></div>
+  <div class="header-actions field-row"><a class="btn" data-variant="outline" href="{{ url('projects/' + project.id) }}">Back to project</a><a class="btn" href="{{ url('projects/' + project.id + '/downloads/' + report.download) }}">Download Markdown</a></div>
 </div>
 
 <div class="report-meta"><span>Generated {{ report.generated_at }}</span><span>Model {{ report.model }}</span></div>
 
-{% if report.warnings %}<section class="section-card warning-card"><h2>Review notes</h2><ul>{% for warning in report.warnings %}<li>{{ warning }}</li>{% endfor %}</ul></section>{% endif %}
+{% if report.warnings %}<div class="warning-card"><h2>Review notes</h2><ul>{% for warning in report.warnings %}<li>{{ warning }}</li>{% endfor %}</ul></div>{% endif %}
 
 {% if report.kind == 'inventory' %}
-<section class="section-card">
-  <div class="section-head"><div><h2>Documents</h2><p>{{ report.documents|length }} classified documents</p></div></div>
-  <div class="table-wrap"><table><thead><tr><th>File</th><th>Type</th><th>Confidence</th><th>Rationale</th></tr></thead><tbody>
+<div class="card">
+  <header><div><h2>Documents</h2><p class="muted">{{ report.documents|length }} classified documents</p></div></header>
+  <section>
+  <div class="table-container">
+  <table class="table"><thead><tr><th>File</th><th>Type</th><th>Confidence</th><th>Rationale</th></tr></thead><tbody>
     {% for document in report.documents %}<tr><td><strong>{{ document.file_path }}</strong></td><td>{{ document.document_type|replace('_', ' ') }}</td><td>{{ (document.confidence * 100)|round|int }}%</td><td>{{ document.rationale or '—' }}</td></tr>{% endfor %}
-  </tbody></table></div>
-</section>
+  </tbody></table>
+  </div>
+  </section>
+</div>
 {% endif %}
 
 {% if report.studies %}<nav class="study-index" aria-label="Studies in this report">{% for item in report.studies %}<a href="#{{ item.anchor }}"><span>{{ item.label }}</span>{% if item.deviations is not none %}<b>{{ item.deviations }}</b>{% endif %}</a>{% endfor %}</nav>{% endif %}
 
-<section class="section-card report-studies">
-  <div class="section-head"><div><h2>{% if report.kind == 'inventory' %}Studies and matches{% else %}Study findings{% endif %}</h2><p>Select a study to read the full detail</p></div></div>
+<div class="card report-studies">
+  <header><div><h2>{% if report.kind == 'inventory' %}Studies and matches{% else %}Study findings{% endif %}</h2><p class="muted">Select a study to read the full detail</p></div></header>
+  <section>
   <div class="study-browser">{% for item in report.studies %}{% include "_study_result.html" %}{% else %}<p class="muted">No study results are available.</p>{% endfor %}</div>
-</section>
+  </section>
+</div>
 
-{% if report.skipped_studies %}<section class="section-card"><h2>Skipped studies</h2><ul>{% for study in report.skipped_studies %}<li><strong>{{ study.label }}</strong>{% if study.review_notes %}: {{ study.review_notes|join('; ') }}{% endif %}</li>{% endfor %}</ul></section>{% endif %}
+{% if report.skipped_studies %}
+<div class="card">
+  <header><h2>Skipped studies</h2></header>
+  <section><ul>{% for study in report.skipped_studies %}<li><strong>{{ study.label }}</strong>{% if study.review_notes %}: {{ study.review_notes|join('; ') }}{% endif %}</li>{% endfor %}</ul></section>
+</div>
+{% endif %}
 {% endblock %}

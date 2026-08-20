@@ -23,6 +23,7 @@ from starlette.datastructures import UploadFile
 from watson.config import ConfigStore, CredentialStoreError, system_credential_store_name
 from watson.deviation_check import DEVIATION_RUN_FILENAME
 from watson.file_support import supported_file_types_label
+from watson.gemini_client import DEFAULT_MODEL
 from watson.jobs import ACTIVE_JOB_STATES, JobConflictError, JobManager, JobNotFoundError
 from watson.projects import (
     MAX_FILE_BYTES,
@@ -108,7 +109,7 @@ def create_app(
 
     @app.get(f"/{session_token}/", response_class=HTMLResponse)
     async def home(request: Request, q: str = "", page: int = 1):
-        per_page = 12
+        per_page = 20
         projects, total = project_store.list(q, page, per_page)
         return render(
             "home.html",
@@ -135,7 +136,7 @@ def create_app(
                 projects=projects,
                 query="",
                 page=1,
-                pages=max(1, math.ceil(total / 12)),
+                pages=max(1, math.ceil(total / 20)),
                 total=total,
                 credential_state=config_store.get_credential_state(),
                 error=str(exc),
@@ -174,6 +175,7 @@ def create_app(
             supported_types=supported_file_types_label(),
             max_file_mb=MAX_FILE_BYTES // (1024 * 1024),
             credential_loaded=config_store.get_credential_state().session_loaded,
+            model=config_store.get_default_model(DEFAULT_MODEL),
         )
 
     @app.get(f"/{session_token}/projects/{{project_id}}/reports/{{kind}}", response_class=HTMLResponse)
@@ -253,8 +255,7 @@ def create_app(
             project=project,
             settings=settings,
             has_outputs=has_outputs,
-            credential_state=config_store.get_credential_state(),
-            credential_store_name=system_credential_store_name(),
+            can_clear_output=has_outputs,
             notice=notice,
             error=error,
         )
@@ -265,11 +266,7 @@ def create_app(
         try:
             if job_manager.active_for_project(project_id):
                 raise JobConflictError("Settings cannot change while a run is active.")
-            settings = ProjectSettings(
-                model=str(form.get("model", "")),
-                thinking_level=str(form.get("thinking_level", "")),
-                file_context=str(form.get("file_context", "")),
-            )
+            settings = ProjectSettings(file_context=str(form.get("file_context", "")))
             invalidated = project_store.set_settings(
                 project_id,
                 settings,
@@ -280,10 +277,65 @@ def create_app(
         notice = "Settings saved; generated results were cleared." if invalidated else "Settings saved."
         return RedirectResponse(url(f"projects/{project_id}/settings?notice={_query_value(notice)}"), status_code=303)
 
+    @app.post(f"/{session_token}/projects/{{project_id}}/rename")
+    async def rename_project(request: Request, project_id: str):
+        form = await request.form(max_fields=10)
+        try:
+            if job_manager.active_for_project(project_id):
+                raise JobConflictError("The project cannot be renamed while a run is active.")
+            project_store.rename(project_id, str(form.get("name", "")))
+        except (ProjectError, JobConflictError) as exc:
+            return RedirectResponse(url(f"projects/{project_id}/settings?error={_query_value(str(exc))}"), status_code=303)
+        return RedirectResponse(url(f"projects/{project_id}/settings?notice=Project+renamed."), status_code=303)
+
+    @app.post(f"/{session_token}/projects/{{project_id}}/clear-output")
+    async def clear_project_output(project_id: str):
+        try:
+            project_store.get(project_id)
+            if job_manager.active_for_project(project_id):
+                raise JobConflictError("Results cannot be cleared while a run is active.")
+            project_store.invalidate_outputs(project_id)
+        except (ProjectError, JobConflictError) as exc:
+            return RedirectResponse(url(f"projects/{project_id}/settings?error={_query_value(str(exc))}"), status_code=303)
+        return RedirectResponse(url(f"projects/{project_id}/settings?notice=Generated+results+cleared%3B+source+inputs+were+kept."), status_code=303)
+
+    @app.post(f"/{session_token}/projects/{{project_id}}/delete")
+    async def delete_project(project_id: str):
+        try:
+            project_store.get(project_id)
+            if job_manager.active_for_project(project_id):
+                raise JobConflictError("The project cannot be deleted while a run is active.")
+            project_store.delete(project_id)
+        except (ProjectError, JobConflictError) as exc:
+            return RedirectResponse(url(f"projects/{project_id}/settings?error={_query_value(str(exc))}"), status_code=303)
+        return RedirectResponse(url(f"?notice={_query_value('Project deleted.')}"), status_code=303)
+
+    @app.get(f"/{session_token}/settings", response_class=HTMLResponse)
+    async def global_settings_page(request: Request, notice: str = "", error: str = ""):
+        return render(
+            "global_settings.html",
+            request,
+            model=config_store.get_default_model(DEFAULT_MODEL),
+            thinking_level=config_store.get_thinking_level(),
+            credential_state=config_store.get_credential_state(),
+            credential_store_name=system_credential_store_name(),
+            notice=notice,
+            error=error,
+        )
+
+    @app.post(f"/{session_token}/settings")
+    async def save_global_settings(request: Request):
+        form = await request.form(max_fields=10)
+        try:
+            config_store.set_default_model(str(form.get("model", "")))
+            config_store.set_thinking_level(str(form.get("thinking_level", "")))
+        except ValueError as exc:
+            return RedirectResponse(url(f"settings?error={_query_value(str(exc))}"), status_code=303)
+        return RedirectResponse(url("settings?notice=Settings+saved."), status_code=303)
+
     @app.post(f"/{session_token}/credentials")
     async def save_credentials(request: Request):
         form = await request.form(max_fields=10)
-        project_id = str(form.get("project_id", ""))
         api_key = str(form.get("api_key", "")).strip()
         try:
             if not api_key:
@@ -293,81 +345,53 @@ def create_app(
                 f"API key saved in {system_credential_store_name()} and loaded for this Watson session."
             )
         except (ProjectError, ValueError, CredentialStoreError) as exc:
-            return RedirectResponse(url(f"projects/{project_id}/settings?error={_query_value(str(exc))}"), status_code=303)
-        return RedirectResponse(url(f"projects/{project_id}/settings?notice={_query_value(notice)}"), status_code=303)
+            return RedirectResponse(url(f"settings?error={_query_value(str(exc))}"), status_code=303)
+        return RedirectResponse(url(f"settings?notice={_query_value(notice)}"), status_code=303)
 
     @app.post(f"/{session_token}/credentials/load")
-    async def load_credentials(request: Request):
-        form = await request.form(max_fields=10)
-        project_id = str(form.get("project_id", ""))
+    async def load_credentials():
         try:
             config_store.load_api_key_from_keychain()
         except CredentialStoreError as exc:
-            return RedirectResponse(
-                url(f"projects/{project_id}/settings?error={_query_value(str(exc))}"),
-                status_code=303,
-            )
+            return RedirectResponse(url(f"settings?error={_query_value(str(exc))}"), status_code=303)
         notice = f"API key loaded from {system_credential_store_name()} for this Watson session."
-        return RedirectResponse(
-            url(f"projects/{project_id}/settings?notice={_query_value(notice)}"),
-            status_code=303,
-        )
+        return RedirectResponse(url(f"settings?notice={_query_value(notice)}"), status_code=303)
 
     @app.post(f"/{session_token}/credentials/forget")
-    async def forget_credentials(request: Request):
-        form = await request.form(max_fields=10)
-        project_id = str(form.get("project_id", ""))
+    async def forget_credentials():
         config_store.forget_session_api_key()
         return RedirectResponse(
-            url(f"projects/{project_id}/settings?notice=API+key+removed+from+this+Watson+session."),
+            url("settings?notice=API+key+removed+from+this+Watson+session."),
             status_code=303,
         )
 
     @app.post(f"/{session_token}/credentials/migrate")
-    async def migrate_credentials(request: Request):
-        form = await request.form(max_fields=10)
-        project_id = str(form.get("project_id", ""))
+    async def migrate_credentials():
         try:
             config_store.migrate_legacy_api_key_to_keychain()
         except CredentialStoreError as exc:
-            return RedirectResponse(
-                url(f"projects/{project_id}/settings?error={_query_value(str(exc))}"),
-                status_code=303,
-            )
+            return RedirectResponse(url(f"settings?error={_query_value(str(exc))}"), status_code=303)
         notice = (
             f"Legacy API key moved to {system_credential_store_name()}, loaded for this session, "
             "and removed from Watson's old file vault."
         )
-        return RedirectResponse(
-            url(f"projects/{project_id}/settings?notice={_query_value(notice)}"),
-            status_code=303,
-        )
+        return RedirectResponse(url(f"settings?notice={_query_value(notice)}"), status_code=303)
 
     @app.post(f"/{session_token}/credentials/delete")
-    async def delete_credentials(request: Request):
-        form = await request.form(max_fields=10)
-        project_id = str(form.get("project_id", ""))
+    async def delete_credentials():
         try:
             config_store.delete_api_key_from_keychain()
         except CredentialStoreError as exc:
-            return RedirectResponse(
-                url(f"projects/{project_id}/settings?error={_query_value(str(exc))}"),
-                status_code=303,
-            )
+            return RedirectResponse(url(f"settings?error={_query_value(str(exc))}"), status_code=303)
         return RedirectResponse(
-            url(f"projects/{project_id}/settings?notice=API+key+deleted+from+the+system+credential+store."),
+            url("settings?notice=API+key+deleted+from+the+system+credential+store."),
             status_code=303,
         )
 
     @app.post(f"/{session_token}/credentials/delete-legacy")
-    async def delete_legacy_credentials(request: Request):
-        form = await request.form(max_fields=10)
-        project_id = str(form.get("project_id", ""))
+    async def delete_legacy_credentials():
         config_store.delete_legacy_api_key()
-        return RedirectResponse(
-            url(f"projects/{project_id}/settings?notice=Legacy+file-vault+API+key+deleted."),
-            status_code=303,
-        )
+        return RedirectResponse(url("settings?notice=Legacy+file-vault+API+key+deleted."), status_code=303)
 
     @app.post(f"/{session_token}/projects/{{project_id}}/runs")
     async def start_run(request: Request, project_id: str):
@@ -379,15 +403,15 @@ def create_app(
             api_key = config_store.get_session_api_key()
             if not api_key:
                 raise ProjectError(
-                    "Explicitly load the Gemini API key from the system credential store in project settings before processing."
+                    "Explicitly load the Gemini API key from the system credential store in Settings before processing."
                 )
             saved = project_store.get_settings(project_id)
             action = str(form.get("action", "all"))
             retry_mode = str(form.get("retry_mode", "failed"))
             settings = RunnerSettings(
                 action=action,
-                model=saved.model,
-                thinking_level=saved.thinking_level,
+                model=config_store.get_default_model(DEFAULT_MODEL),
+                thinking_level=config_store.get_thinking_level(),
                 api_key=api_key,
                 retry_mode=retry_mode,
                 file_context=saved.file_context,
@@ -487,7 +511,7 @@ def create_app(
 
     @app.get(f"/{session_token}/static/{{filename}}")
     async def static_asset(filename: str):
-        if filename not in {"watson.css", "settings.css", "watson.js"}:
+        if filename not in {"basecoat.css", "theme.css", "watson.css", "settings.css", "watson.js", "theme-init.js"}:
             raise HTTPException(status_code=404)
         return FileResponse(static_dir() / filename)
 

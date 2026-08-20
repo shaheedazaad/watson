@@ -68,7 +68,7 @@ def test_settings_require_confirmation_before_outputs_are_invalidated(tmp_path: 
     (paths.inputs / "source.txt").write_text("source", encoding="utf-8")
     (paths.state / "inventory.json").write_text("{}", encoding="utf-8")
     (paths.outputs / "report.md").write_text("result", encoding="utf-8")
-    changed = ProjectSettings(model="new-model", thinking_level="medium")
+    changed = ProjectSettings(file_context="paper.pdf is the main article.")
 
     with pytest.raises(SettingsInvalidationRequired):
         store.set_settings(project.id, changed)
@@ -88,6 +88,33 @@ def test_invalid_settings_never_delete_outputs(tmp_path: Path) -> None:
     output.write_text(json.dumps({"ok": True}), encoding="utf-8")
 
     with pytest.raises(ValueError):
-        ProjectSettings(model="", thinking_level="high")
+        ProjectSettings(file_context="x" * 20_001)
 
     assert output.exists()
+
+
+def test_project_settings_ignores_legacy_model_fields(tmp_path: Path) -> None:
+    store = ProjectStore(tmp_path)
+    project = store.create("Legacy settings")
+    paths = store.paths(project.id)
+    paths.settings.write_text(
+        json.dumps({"model": "old-model", "thinking_level": "medium", "file_context": "kept"}),
+        encoding="utf-8",
+    )
+
+    settings = store.get_settings(project.id)
+
+    assert settings.file_context == "kept"
+
+
+def test_rename_and_delete_project(tmp_path: Path) -> None:
+    store = ProjectStore(tmp_path)
+    project = store.create("Original name")
+
+    renamed = store.rename(project.id, "  New   name ")
+    assert renamed.name == "New name"
+    assert store.get(project.id).name == "New name"
+
+    store.delete(project.id)
+    with pytest.raises(ProjectError):
+        store.get(project.id)

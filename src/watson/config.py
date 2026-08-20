@@ -212,8 +212,11 @@ class ConfigStore:
         return value if isinstance(value, str) and value else fallback
 
     def set_default_model(self, model: str) -> None:
+        normalized = model.strip()
+        if not normalized or len(normalized) > 200 or any(ord(character) < 32 for character in normalized):
+            raise ValueError("Model must be a non-empty identifier of at most 200 characters.")
         config = self.read_config()
-        config["model"] = model
+        config["model"] = normalized
         self.write_config(config)
 
     def get_thinking_level(self, fallback: str = DEFAULT_THINKING_LEVEL) -> str:

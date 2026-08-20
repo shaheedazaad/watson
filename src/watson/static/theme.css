@@ -1,0 +1,66 @@
+/* Watson brown theme — overrides basecoat's default achromatic tokens.
+   Loaded after basecoat.css. Dark mode activates via html.dark (see watson.js). */
+
+:root {
+  --background: oklch(0.985 0.006 70);
+  --foreground: oklch(0.24 0.03 45);
+  --card: oklch(0.995 0.004 70);
+  --card-foreground: oklch(0.24 0.03 45);
+  --popover: oklch(0.995 0.004 70);
+  --popover-foreground: oklch(0.24 0.03 45);
+  --primary: oklch(0.4 0.075 45);
+  --primary-foreground: oklch(0.98 0.006 70);
+  --secondary: oklch(0.94 0.018 60);
+  --secondary-foreground: oklch(0.3 0.035 45);
+  --muted: oklch(0.95 0.014 60);
+  --muted-foreground: oklch(0.48 0.03 45);
+  --accent: oklch(0.91 0.025 55);
+  --accent-foreground: oklch(0.28 0.035 45);
+  --destructive: oklch(0.55 0.19 25);
+  --border: oklch(0.88 0.02 55);
+  --input: oklch(0.88 0.02 55);
+  --ring: oklch(0.55 0.06 50);
+  --sidebar: oklch(0.97 0.012 60);
+  --sidebar-foreground: oklch(0.24 0.03 45);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+  --chevron-down-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="oklch(0.48 0.03 45)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>');
+  --chevron-down-icon-50: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="oklch(0.48 0.03 45 / 0.5)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>');
+  --check-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="oklch(0.48 0.03 45)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>');
+}
+
+.dark {
+  --background: oklch(0.2 0.018 45);
+  --foreground: oklch(0.94 0.02 65);
+  --card: oklch(0.245 0.02 45);
+  --card-foreground: oklch(0.94 0.02 65);
+  --popover: oklch(0.245 0.02 45);
+  --popover-foreground: oklch(0.94 0.02 65);
+  --primary: oklch(0.78 0.07 65);
+  --primary-foreground: oklch(0.22 0.03 45);
+  --secondary: oklch(0.3 0.02 45);
+  --secondary-foreground: oklch(0.92 0.02 65);
+  --muted: oklch(0.28 0.018 45);
+  --muted-foreground: oklch(0.68 0.03 55);
+  --accent: oklch(0.33 0.025 50);
+  --accent-foreground: oklch(0.92 0.02 65);
+  --destructive: oklch(0.65 0.17 25);
+  --border: oklch(1 0.01 60 / 12%);
+  --input: oklch(1 0.01 60 / 16%);
+  --ring: oklch(0.6 0.05 55);
+  --sidebar: oklch(0.23 0.02 45);
+  --sidebar-foreground: oklch(0.94 0.02 65);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+  --chevron-down-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="oklch(0.68 0.03 55)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>');
+  --chevron-down-icon-50: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="oklch(0.68 0.03 55 / 0.5)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>');
+  --check-icon: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="oklch(0.68 0.03 55)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>');
+}

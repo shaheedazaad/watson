@@ -1,24 +1,29 @@
 {% extends "base.html" %}
 {% block title %}{{ project.name }} · Watson{% endblock %}
 {% block content %}
-<nav class="breadcrumbs"><a href="{{ url() }}">Projects</a><span>/</span><span>{{ project.name }}</span></nav>
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <ol>
+    <li><a href="{{ url() }}">Projects</a></li>
+    <li aria-hidden="true"><span>/</span></li>
+    <li aria-current="page"><span>{{ project.name }}</span></li>
+  </ol>
+</nav>
 
-<div class="page-heading project-heading">
+<div class="page-heading">
   <div>
-    <p class="eyebrow">Project</p>
-    <h1>{{ project.name }}</h1>
-    <p class="lede">{{ inputs|length }} input{% if inputs|length != 1 %}s{% endif %} · Model {{ settings.model }}</p>
+    <h1 class="page-title">{{ project.name }}</h1>
+    <p class="lede">{{ inputs|length }} input{% if inputs|length != 1 %}s{% endif %} · Model {{ model }}</p>
   </div>
-  <div class="header-actions">
-    <a class="button quiet" href="{{ url('projects/' + project.id + '/settings') }}">Settings</a>
-    <form action="{{ url('projects/' + project.id + '/open-folder') }}" method="post"><button class="quiet" type="submit">Open folder</button></form>
-    {% if summary.has_result %}<a class="button quiet" href="{{ url('projects/' + project.id + '/download.zip') }}">Download results</a>{% endif %}
-    {% if summary.reports %}{% set primary_report = summary.reports|last %}<a class="button primary" href="{{ url('projects/' + project.id + '/reports/' + primary_report.kind) }}">Read report</a>{% endif %}
+  <div class="header-actions field-row">
+    <a class="btn" data-variant="outline" href="{{ url('projects/' + project.id + '/settings') }}">Settings</a>
+    <form action="{{ url('projects/' + project.id + '/open-folder') }}" method="post"><button class="btn" data-variant="outline" type="submit">Open folder</button></form>
+    {% if summary.has_result %}<a class="btn" data-variant="outline" href="{{ url('projects/' + project.id + '/download.zip') }}">Download results</a>{% endif %}
+    {% if summary.reports %}{% set primary_report = summary.reports|last %}<a class="btn" href="{{ url('projects/' + project.id + '/reports/' + primary_report.kind) }}">Read report</a>{% endif %}
   </div>
 </div>
 
-{% if notice %}<div class="flash success" role="status">{{ notice }}</div>{% endif %}
-{% if error %}<div class="flash error" role="alert">{{ error }}</div>{% endif %}
+{% if notice %}<div class="alert alert-success" role="status"><section><p>{{ notice }}</p></section></div>{% endif %}
+{% if error %}<div class="alert" data-variant="destructive" role="alert"><section><p>{{ error }}</p></section></div>{% endif %}
 
 {% if summary.has_result %}
 <section class="result-strip" aria-label="Result summary">
@@ -32,39 +37,40 @@
 {% if summary.usage %}<p class="resource-line">Last run: {{ summary.usage.requests|default(0) }} model request{% if summary.usage.requests|default(0) != 1 %}s{% endif %} · {{ summary.usage.total_tokens|default(0) }} total tokens</p>{% endif %}
 {% else %}
 <section class="next-step">
-  <span class="step-number">1</span>
+  <span class="step-badge">1</span>
   <div><h2>No result yet</h2><p>Add the article, preregistration, and relevant supplements below. Then start processing.</p></div>
 </section>
 {% endif %}
 
 {% if active_job %}
-<section class="run-panel active" data-job-events="{{ url('projects/' + project.id + '/runs/' + active_job.id + '/events') }}">
+<section class="card run-panel active" data-job-events="{{ url('projects/' + project.id + '/runs/' + active_job.id + '/events') }}">
   <div class="pulse"></div>
-  <div class="run-copy"><p class="eyebrow">{{ active_job.state }}</p><h2 id="run-message">{{ active_job.message }}</h2><p>It is safe to refresh this page. Completed work is saved as it finishes.</p></div>
-  <form action="{{ url('projects/' + project.id + '/runs/' + active_job.id + '/cancel') }}" method="post"><button class="danger" type="submit">Cancel run</button></form>
+  <div class="run-copy"><span class="badge status {{ active_job.state }}">{{ active_job.state }}</span><h2 id="run-message">{{ active_job.message }}</h2><p>It is safe to refresh this page. Completed work is saved as it finishes.</p></div>
+  <form action="{{ url('projects/' + project.id + '/runs/' + active_job.id + '/cancel') }}" method="post"><button class="btn" data-variant="destructive" type="submit">Cancel run</button></form>
 </section>
 {% else %}
-<section class="run-panel">
-  <div class="run-copy"><p class="eyebrow">Processing</p><h2>Run Watson</h2><p>{% if credential_loaded %}Retries continue missing or failed work. A complete rerun replaces completed study checks.{% else %}Watson has not loaded an API key for this session. <a href="{{ url('projects/' + project.id + '/settings') }}">Explicitly load it in Settings</a>; this page will never access the system credential store.{% endif %}</p></div>
+<section class="card run-panel">
+  <div class="run-copy"><h2>Run Watson</h2><p>{% if credential_loaded %}Retries continue missing or failed work. A complete rerun replaces completed study checks.{% else %}Watson has not loaded an API key for this session. <a href="{{ url('settings') }}">Explicitly load it in Settings</a>; this page will never access the system credential store.{% endif %}</p></div>
   <form class="run-controls" action="{{ url('projects/' + project.id + '/runs') }}" method="post">
-    <select name="action" aria-label="Processing step">
+    <select class="select" name="action" aria-label="Processing step">
       <option value="all">Inventory + preregistration check</option>
       <option value="inventory">Inventory only</option>
       <option value="deviation">Preregistration check only</option>
     </select>
-    <select name="retry_mode" aria-label="Retry behavior">
+    <select class="select" name="retry_mode" aria-label="Retry behavior">
       <option value="failed">Continue failed or missing work</option>
       <option value="all">Complete rerun</option>
     </select>
-    <button class="primary" type="submit" {% if not inputs or not credential_loaded %}disabled{% endif %}>Start processing</button>
+    <button class="btn" type="submit" {% if not inputs or not credential_loaded %}disabled{% endif %}>Start processing</button>
   </form>
 </section>
 {% endif %}
 
 <div class="two-column">
-  <section class="section-card">
-    <div class="section-head"><div><h2>Input documents</h2><p>{{ supported_types }}</p></div></div>
-    <form class="upload-zone dropzone-form" data-dropzone action="{{ url('projects/' + project.id + '/inputs') }}" method="post" enctype="multipart/form-data">
+  <div class="card">
+    <header><div><h2>Input documents</h2><p class="muted">{{ supported_types }}</p></div></header>
+    <section>
+    <form class="dropzone-form" data-dropzone action="{{ url('projects/' + project.id + '/inputs') }}" method="post" enctype="multipart/form-data">
       <input id="file-input" type="file" name="files" accept=".pdf,.txt,.csv,.html,.htm,.xml,.json,.rtf" multiple required hidden {% if active_job %}disabled{% endif %}>
       <div class="dropzone-surface">
         <span class="dropzone-icon" aria-hidden="true">↓</span>
@@ -72,11 +78,11 @@
           <label for="file-input"><strong>Drop files here</strong></label>
           <span>PDF, text, CSV, HTML, XML, JSON, or RTF · up to {{ max_file_mb }} MB each</span>
         </div>
-        <button class="primary" type="button" data-file-picker {% if active_job %}disabled{% endif %}>Add files</button>
+        <button class="btn" type="button" data-file-picker {% if active_job %}disabled{% endif %}>Add files</button>
       </div>
       <div class="dropzone-selection" aria-live="polite">
         <span data-file-selection>No files selected</span>
-        <button class="quiet" type="submit" data-upload-submit disabled>Upload selected</button>
+        <button class="btn" data-variant="outline" type="submit" data-upload-submit disabled>Upload selected</button>
       </div>
     </form>
     {% if inputs %}
@@ -87,17 +93,19 @@
         <div><strong>{{ input.name }}</strong><small>{{ (input.size_bytes / 1024)|round(1) }} KB</small></div>
         <form action="{{ url('projects/' + project.id + '/inputs/delete') }}" method="post">
           <input type="hidden" name="filename" value="{{ input.name }}">
-          <button class="icon-button" type="submit" aria-label="Remove {{ input.name }}" {% if active_job %}disabled{% endif %}>×</button>
+          <button class="btn" data-variant="ghost" data-size="icon-sm" type="submit" aria-label="Remove {{ input.name }}" {% if active_job %}disabled{% endif %}>×</button>
         </form>
       </div>
       {% endfor %}
     </div>
     {% endif %}
-  </section>
+    </section>
+  </div>
 
   <aside>
-    <section class="section-card compact">
-      <div class="section-head"><div><h2>Reports and downloads</h2><p>Read here or save a copy</p></div></div>
+    <div class="card compact">
+      <header><div><h2>Reports and downloads</h2><p class="muted">Read here or save a copy</p></div></header>
+      <section>
       {% if summary.reports %}
       <div class="browser-report-list">
         {% for report in summary.reports %}<a href="{{ url('projects/' + project.id + '/reports/' + report.kind) }}"><span>⌘</span><strong>{{ report.label }}</strong><b>→</b></a>{% endfor %}
@@ -108,31 +116,36 @@
         {% for filename in summary.downloads %}<a href="{{ url('projects/' + project.id + '/downloads/' + filename) }}"><span>{{ filename }}</span><b>↓</b></a>{% endfor %}
       </div>
       {% else %}<p class="muted">Downloads appear after processing.</p>{% endif %}
-    </section>
+      </section>
+    </div>
 
-    <section class="section-card compact">
-      <div class="section-head"><div><h2>Recent runs</h2></div></div>
+    <div class="card compact">
+      <header><div><h2>Recent runs</h2></div></header>
+      <section>
       {% if jobs %}
-      <div class="job-list">{% for job in jobs[:5] %}<div><span class="status {{ job.state }}">{{ job.state }}</span><p>{{ job.message }}</p><time>{{ job.updated_at.strftime('%d %b, %H:%M') }}</time></div>{% endfor %}</div>
+      <div class="job-list">{% for job in jobs[:5] %}<div><span class="badge status {{ job.state }}">{{ job.state }}</span><p>{{ job.message }}</p><time>{{ job.updated_at.strftime('%d %b, %H:%M') }}</time></div>{% endfor %}</div>
       {% else %}<p class="muted">No runs yet.</p>{% endif %}
-    </section>
+      </section>
+    </div>
   </aside>
 </div>
 
 {% if summary.warnings %}
-<details class="section-card warning-card" open>
-  <summary>Warnings and review notes <span>{{ summary.warnings|length }}</span></summary>
+<details class="warning-card" open>
+  <summary><span>Warnings and review notes</span><span class="badge" data-variant="outline">{{ summary.warnings|length }}</span></summary>
   <ul>{% for warning in summary.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
 </details>
 {% endif %}
 
 {% if summary.items %}
-<section class="section-card">
-  <div class="section-head"><div><h2>Study results</h2><p>Select a study to read its assessment and specific findings</p></div></div>
+<div class="card study-results-card">
+  <header><div><h2>Study results</h2><p class="muted">Select a study to read its assessment and specific findings</p></div></header>
+  <section>
   <div class="study-browser">
     {% for item in items %}{% include "_study_result.html" %}{% endfor %}
   </div>
   {% if item_pages > 1 %}<nav class="pagination">{% if item_page > 1 %}<a href="{{ url('projects/' + project.id) }}?item_page={{ item_page - 1 }}">Previous</a>{% endif %}<span>Page {{ item_page }} of {{ item_pages }}</span>{% if item_page < item_pages %}<a href="{{ url('projects/' + project.id) }}?item_page={{ item_page + 1 }}">Next</a>{% endif %}</nav>{% endif %}
-</section>
+  </section>
+</div>
 {% endif %}
 {% endblock %}

@@ -1,74 +1,64 @@
 {% extends "base.html" %}
 {% block title %}Settings · {{ project.name }} · Watson{% endblock %}
 {% block content %}
-<nav class="breadcrumbs"><a href="{{ url() }}">Projects</a><span>/</span><a href="{{ url('projects/' + project.id) }}">{{ project.name }}</a><span>/</span><span>Settings</span></nav>
-<div class="page-heading"><div><p class="eyebrow">Project configuration</p><h1>Settings</h1><p class="lede">Processing settings apply only to {{ project.name }}. The Gemini credential is shared by your local Watson projects.</p></div></div>
-{% if notice %}<div class="flash success" role="status">{{ notice }}</div>{% endif %}
-{% if error %}<div class="flash error" role="alert">{{ error }}</div>{% endif %}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <ol>
+    <li><a href="{{ url() }}">Projects</a></li>
+    <li aria-hidden="true"><span>/</span></li>
+    <li><a href="{{ url('projects/' + project.id) }}">{{ project.name }}</a></li>
+    <li aria-hidden="true"><span>/</span></li>
+    <li aria-current="page"><span>Settings</span></li>
+  </ol>
+</nav>
+<div class="page-heading"><div><h1 class="page-title">Settings</h1><p class="lede">Project-specific options for {{ project.name }}. Model and API key are shared across projects in <a href="{{ url('settings') }}">Settings</a>.</p></div></div>
+{% if notice %}<div class="alert alert-success" role="status"><section><p>{{ notice }}</p></section></div>{% endif %}
+{% if error %}<div class="alert" data-variant="destructive" role="alert"><section><p>{{ error }}</p></section></div>{% endif %}
 
 <div class="settings-grid">
-  <form class="section-card settings-form" action="{{ url('projects/' + project.id + '/settings') }}" method="post">
-    <div class="section-head"><div><h2>Processing</h2><p>Changes to these values can change the results.</p></div></div>
-    <label>Gemini model <span>Editable for preview or custom model identifiers.</span><input name="model" value="{{ settings.model }}" maxlength="200" required></label>
-    <label>Reasoning effort <span>Higher levels may take longer and use more resources.</span>
-      <select name="thinking_level">
-        {% for value in ['minimal', 'low', 'medium', 'high'] %}<option value="{{ value }}" {% if settings.thinking_level == value %}selected{% endif %}>{{ value|capitalize }}</option>{% endfor %}
-      </select>
-    </label>
-    <label>Document context <span>Optional notes explaining filenames, article roles, or study naming.</span><textarea name="file_context" maxlength="20000" rows="8" placeholder="Example: paper.pdf is the main article; osf-registration.pdf covers Study 2.">{{ settings.file_context }}</textarea></label>
+  <form class="settings-form" action="{{ url('projects/' + project.id + '/settings') }}" method="post">
+    <div><h2>Document context</h2><p class="muted">Changes to this value can change the results.</p></div>
+
+    <div class="field">
+      <label for="settings-context">Notes for Watson</label>
+      <textarea id="settings-context" class="textarea" name="file_context" maxlength="20000" rows="8" placeholder="Example: paper.pdf is the main article; osf-registration.pdf covers Study 2.">{{ settings.file_context }}</textarea>
+      <p>Optional notes explaining filenames, article roles, or study naming.</p>
+    </div>
+
     {% if has_outputs %}
-    <label class="check-row"><input type="checkbox" name="confirm_invalidation" value="yes"><span><strong>Confirm result reset</strong>Changing processing settings clears generated outputs, but always keeps source inputs.</span></label>
+    <div class="field">
+      <label for="confirm-invalidation">
+        <input id="confirm-invalidation" class="input" type="checkbox" name="confirm_invalidation" value="yes">
+        <span><strong>Confirm result reset</strong> Changing this note clears generated outputs, but always keeps source inputs.</span>
+      </label>
+    </div>
     {% endif %}
-    <button class="primary" type="submit">Save project settings</button>
+
+    <button class="btn" type="submit">Save project settings</button>
   </form>
 
-  <div>
-    <details class="section-card settings-form" open>
-      <summary>Gemini credential
-        {% if credential_state.session_loaded %}<span class="status complete">ready this session</span>
-        {% elif credential_state.has_legacy_key %}<span class="status running">migration available</span>
-        {% elif credential_state.has_saved_key %}<span class="status running">not loaded</span>
-        {% else %}<span class="status failed">not configured</span>{% endif %}
-      </summary>
-      <p class="muted">Watson never accesses {{ credential_store_name }} during launch, page loads, updates, or processing. Only the clearly labelled actions below can read, write, or delete the saved key. The key is held in memory after an explicit save or load and disappears when Watson closes.</p>
+  <aside>
+    <form class="settings-form" action="{{ url('projects/' + project.id + '/rename') }}" method="post">
+      <div><h2>Project name</h2></div>
+      <div class="field">
+        <label for="settings-rename">Name</label>
+        <input id="settings-rename" class="input" name="name" value="{{ project.name }}" maxlength="100" required>
+      </div>
+      <button class="btn" data-variant="outline" type="submit">Rename project</button>
+    </form>
 
-      {% if credential_state.has_legacy_key %}
-      <div class="flash warning">An API key from an earlier Watson version is still in the old local file vault. Watson will not load it into the session or migrate it automatically.</div>
-      <form action="{{ url('credentials/migrate') }}" method="post">
-        <input type="hidden" name="project_id" value="{{ project.id }}">
-        <button class="primary" type="submit">Move old key to {{ credential_store_name }}</button>
-        <p class="action-note">Explicit action: reads the old vault, writes {{ credential_store_name }}, then removes the old vault. Your operating system may ask you to approve access.</p>
+    <div class="settings-form">
+      <div><h2>Clear generated results</h2><p class="muted">Removes the inventory, checks, and reports for this project. Source inputs are kept, so you can start fresh.</p></div>
+      <form action="{{ url('projects/' + project.id + '/clear-output') }}" method="post" data-confirm="Clear all generated results for {{ project.name }}? Source inputs are kept.">
+        <button class="btn" data-variant="outline" type="submit" {% if not can_clear_output %}disabled{% endif %}>Clear generated results</button>
       </form>
-      <form action="{{ url('credentials/delete-legacy') }}" method="post">
-        <input type="hidden" name="project_id" value="{{ project.id }}">
-        <button class="danger-text" type="submit">Delete old file-vault key</button>
-      </form>
-      {% endif %}
+    </div>
 
-      {% if credential_state.has_saved_key and not credential_state.session_loaded %}
-      <div class="flash warning">A key is recorded as saved, but Watson has not accessed it in this session. After an update, use this explicit reconnect step; your operating system may ask you to approve access again.</div>
-      <form action="{{ url('credentials/load') }}" method="post">
-        <input type="hidden" name="project_id" value="{{ project.id }}">
-        <button class="primary" type="submit">Load from {{ credential_store_name }} for this session</button>
-        <p class="action-note">Explicit credential-store read: this is the only action that loads an already-saved key.</p>
+    <div class="settings-form">
+      <div><h2>Delete project</h2><p class="muted">Permanently deletes {{ project.name }}, including its inputs, results, and reports. This cannot be undone.</p></div>
+      <form action="{{ url('projects/' + project.id + '/delete') }}" method="post" data-confirm="Permanently delete {{ project.name }}? This cannot be undone.">
+        <button class="btn" data-variant="destructive" type="submit">Delete project</button>
       </form>
-      {% elif credential_state.session_loaded %}
-      <div class="flash success">The API key is available in memory for this Watson session.</div>
-      <form action="{{ url('credentials/forget') }}" method="post">
-        <input type="hidden" name="project_id" value="{{ project.id }}">
-        <button class="quiet" type="submit">Remove key from this session</button>
-        <p class="action-note">Does not access or delete the saved Keychain item.</p>
-      </form>
-      {% endif %}
-
-      <form action="{{ url('credentials') }}" method="post">
-        <input type="hidden" name="project_id" value="{{ project.id }}">
-        <label>{% if credential_state.has_saved_key %}Replace{% else %}Add{% endif %} Gemini API key <input type="password" name="api_key" autocomplete="off" placeholder="Paste a new key" required></label>
-        <button class="primary" type="submit">Save to {{ credential_store_name }}</button>
-        <p class="action-note">Explicit credential-store write: saving also loads the new key into this session. Your operating system may ask you to approve access.</p>
-      </form>
-      {% if credential_state.has_saved_key %}<form action="{{ url('credentials/delete') }}" method="post"><input type="hidden" name="project_id" value="{{ project.id }}"><button class="danger-text" type="submit">Delete from {{ credential_store_name }}</button><p class="action-note">Explicit credential-store delete; your operating system may ask you to approve access.</p></form>{% endif %}
-    </details>
-  </div>
+    </div>
+  </aside>
 </div>
 {% endblock %}

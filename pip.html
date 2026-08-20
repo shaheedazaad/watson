@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Shared Attention Companion</title>
+<style>
+  body { margin: 0; padding: 2rem; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; gap: 1.5rem; background: #fafafa; }
+
+  /* ===== Companion styles (copy this block into your jsPsych experiment) ===== */
+  .companion-host {
+    width: 200px;
+    height: 220px;
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    perspective: 650px;
+  }
+  .companion-bubble {
+    position: absolute; top: 4px; left: 50%;
+    transform: translateX(-50%) translateY(8px);
+    background: white; border: 1.5px solid #0F6E56; color: #0F6E56;
+    padding: 6px 14px; border-radius: 16px;
+    font-size: 14px; font-weight: 500; white-space: nowrap;
+    opacity: 0; transition: opacity 0.3s ease, transform 0.3s ease;
+    pointer-events: none; z-index: 3;
+  }
+  .companion-bubble::after {
+    content: ''; position: absolute; bottom: -7px; left: 50%;
+    transform: translateX(-50%); width: 0; height: 0;
+    border-left: 6px solid transparent; border-right: 6px solid transparent;
+    border-top: 7px solid #0F6E56;
+  }
+  .companion-bubble::before {
+    content: ''; position: absolute; bottom: -5px; left: 50%;
+    transform: translateX(-50%); width: 0; height: 0;
+    border-left: 5px solid transparent; border-right: 5px solid transparent;
+    border-top: 6px solid white; z-index: 1;
+  }
+  .companion-bubble.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .companion-bob {
+    width: 140px; height: 160px;
+    animation: companion-bob 3.5s ease-in-out infinite;
+  }
+  .companion-bob.jumping { animation: companion-jump 0.6s ease-out; }
+  @keyframes companion-bob {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-6px); }
+  }
+  @keyframes companion-jump {
+    0%   { transform: translateY(0) scale(1); }
+    15%  { transform: translateY(2px) scaleY(0.82) scaleX(1.12); }
+    45%  { transform: translateY(-42px) scaleY(1.14) scaleX(0.9); }
+    75%  { transform: translateY(2px) scaleY(0.88) scaleX(1.08); }
+    100% { transform: translateY(0) scale(1); }
+  }
+
+  .companion-scene { width: 100%; height: 100%; position: relative; transform-style: preserve-3d; }
+  .companion-static-body { position: absolute; inset: 0; pointer-events: none; }
+  .companion-features {
+    position: absolute; inset: 0;
+    transform-style: preserve-3d;
+    transition: transform 0.9s cubic-bezier(0.65, 0, 0.35, 1);
+    transform-origin: 50% 48.75%;  /* ball centre: 78/160 = 48.75% */
+  }
+  .companion-feature {
+    position: absolute; inset: 0;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+  }
+  .companion-feature.front { transform: translateZ(40px); }
+  .companion-feature.back  { transform: rotateY(180deg) translateZ(40px); }
+
+  .companion-eyes { transition: transform 0.12s ease-in-out; transform-origin: 70px 70px; }
+  .companion-host.blink .companion-eyes { transform: scaleY(0.08); }
+
+  /* Demo-only controls */
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; align-items: center; }
+  .controls button { padding: 6px 12px; font-size: 13px; cursor: pointer; }
+  .angle-input { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+  .angle-input input { width: 64px; height: 30px; padding: 4px 8px; }
+  .status { font-size: 13px; color: #666; }
+</style>
+</head>
+<body>
+
+<!-- ===== Companion markup (copy into your jsPsych trial stimulus) ===== -->
+<div class="companion-host" id="companion-host">
+  <div class="companion-bubble" id="companion-bubble">Hi!</div>
+  <div class="companion-bob" id="companion-bob">
+    <div class="companion-scene">
+      <!-- Static body silhouette: doesn't rotate, acts as the fixed "head" shape -->
+      <svg class="companion-static-body" viewBox="0 0 140 160" width="140" height="160">
+        <defs>
+          <radialGradient id="ballShade" cx="40%" cy="35%" r="65%">
+            <stop offset="0%" stop-color="#D4F2E6"/>
+            <stop offset="55%" stop-color="#9FE1CB"/>
+            <stop offset="100%" stop-color="#6BC4A4"/>
+          </radialGradient>
+          <clipPath id="ballClip">
+            <circle cx="70" cy="78" r="52"/>
+          </clipPath>
+        </defs>
+        <!-- Drop shadow -->
+        <ellipse cx="70" cy="140" rx="30" ry="6" fill="#0F6E56" opacity="0.18"/>
+        <!-- Ball body -->
+        <circle cx="70" cy="78" r="52" fill="url(#ballShade)" stroke="#0F6E56" stroke-width="2"/>
+        <!-- Top cap — lowered border at y=50 -->
+        <rect x="18" y="26" width="104" height="24" fill="#6BC4A4" clip-path="url(#ballClip)"/>
+        <rect x="18" y="49" width="104" height="1.5" fill="#0F6E56" opacity="0.25" clip-path="url(#ballClip)"/>
+        <!-- Specular highlight sits inside the cap -->
+        <ellipse cx="58" cy="33" rx="14" ry="6" fill="white" opacity="0.35"/>
+      </svg>
+      <!-- Features layer: orbits around the body in 3D -->
+      <div class="companion-features" id="companion-features">
+        <div class="companion-feature front">
+          <svg viewBox="0 0 140 160" width="140" height="160" style="overflow: visible;">
+            <g class="companion-eyes">
+              <ellipse cx="54" cy="70" rx="10" ry="13" fill="white" stroke="#0F6E56" stroke-width="1.5"/>
+              <ellipse cx="86" cy="70" rx="10" ry="13" fill="white" stroke="#0F6E56" stroke-width="1.5"/>
+              <circle cx="54" cy="72" r="5" fill="#0F6E56"/>
+              <circle cx="86" cy="72" r="5" fill="#0F6E56"/>
+              <circle cx="56" cy="69" r="1.5" fill="white"/>
+              <circle cx="88" cy="69" r="1.5" fill="white"/>
+            </g>
+            <path d="M 58 98 Q 70 107 82 98" stroke="#0F6E56" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+            <circle cx="40" cy="92" r="5" fill="#F0997B" opacity="0.4"/>
+            <circle cx="100" cy="92" r="5" fill="#F0997B" opacity="0.4"/>
+          </svg>
+        </div>
+        <div class="companion-feature back">
+          <svg viewBox="0 0 140 160" width="140" height="160" style="overflow: visible;">
+            <path d="M 70 26 L 70 130" stroke="#0F6E56" stroke-width="1" fill="none" stroke-dasharray="3,5" opacity="0.3"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Demo controls — REMOVE these from your jsPsych version -->
+<p class="status" id="status">Facing you (0°)</p>
+<div class="controls">
+  <button onclick="companion.faceParticipant()">Face me</button>
+  <span class="angle-input">
+    <button onclick="companion.face(parseInt(document.getElementById('angle-val').value)||0)">Face at</button>
+    <input type="number" id="angle-val" value="45" min="-360" max="360" step="15"/>
+    <span>°</span>
+  </span>
+  <button onclick="companion.jump()">Jump</button>
+  <button onclick="companion.introduce('Pip')">Introduce</button>
+</div>
+
+<!-- ===== Companion script (copy into your jsPsych experiment) ===== -->
+<script>
+(function(){
+  const host     = document.getElementById('companion-host');
+  const bob      = document.getElementById('companion-bob');
+  const features = document.getElementById('companion-features');
+  const bubble   = document.getElementById('companion-bubble');
+  const status   = document.getElementById('status');  // demo only
+  let companionName = 'Pip';
+  let bubbleTimer = null;
+
+  function setAngle(deg) {
+    deg = Number(deg) || 0;
+    features.style.transform = 'rotateY(' + deg + 'deg)';
+    const n = ((deg % 360) + 360) % 360;
+    const facingForward = n < 90 || n > 270;
+    host.dataset.facing = facingForward ? 'front' : 'back';
+    if (status) {
+      status.textContent = facingForward
+        ? 'Facing you (' + deg + '°)'
+        : 'Facing stimuli (' + deg + '°)';
+    }
+  }
+
+  window.companion = {
+    face(degrees)            { setAngle(degrees); },
+    faceParticipant()        { setAngle(0); },
+    faceStimuli(degrees)     { setAngle(degrees != null ? degrees : 180); },
+    jump() {
+      bob.classList.remove('jumping');
+      void bob.offsetWidth;  // force reflow so animation restarts cleanly
+      bob.classList.add('jumping');
+      setTimeout(() => bob.classList.remove('jumping'), 620);
+    },
+    introduce(name, message) {
+      if (name) companionName = name;
+      const text = message || ('Hi! I\u2019m ' + companionName);
+      this.faceParticipant();
+      bubble.textContent = text;
+      bubble.classList.add('show');
+      this.jump();
+      if (bubbleTimer) clearTimeout(bubbleTimer);
+      bubbleTimer = setTimeout(() => bubble.classList.remove('show'), 2800);
+    },
+    name() { return companionName; }
+  };
+
+  // Blink only when face is visible (i.e., not turned away)
+  function blink() {
+    if (host.dataset.facing !== 'back') {
+      host.classList.add('blink');
+      setTimeout(() => host.classList.remove('blink'), 140);
+    }
+    setTimeout(blink, 2500 + Math.random() * 3500);
+  }
+  setTimeout(blink, 1500);
+  host.dataset.facing = 'front';
+})();
+</script>
+
+</body>
+</html>

@@ -1,7 +1,27 @@
 (() => {
+  setupThemeToggle();
+  setupConfirmForms();
   setupDropzone();
   setupJobEvents();
   setupStudyLinks();
+
+  function setupConfirmForms() {
+    document.querySelectorAll("form[data-confirm]").forEach((form) => {
+      form.addEventListener("submit", (event) => {
+        if (!window.confirm(form.dataset.confirm)) event.preventDefault();
+      });
+    });
+  }
+
+  function setupThemeToggle() {
+    const toggle = document.querySelector("[data-theme-toggle]");
+    if (!toggle) return;
+    toggle.addEventListener("click", () => {
+      const dark = !document.documentElement.classList.contains("dark");
+      document.documentElement.classList.toggle("dark", dark);
+      localStorage.setItem("watson-theme", dark ? "dark" : "light");
+    });
+  }
 
   function setupDropzone() {
     const form = document.querySelector("[data-dropzone]");

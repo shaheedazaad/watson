@@ -13,8 +13,13 @@ REQUIRED_SOURCE_FILES = {
     "src/watson/templates/project.html",
     "src/watson/templates/report.html",
     "src/watson/templates/settings.html",
+    "src/watson/templates/global_settings.html",
     "src/watson/templates/_study_result.html",
+    "src/watson/static/basecoat.css",
+    "src/watson/static/theme.css",
+    "src/watson/static/theme-init.js",
     "src/watson/static/watson.css",
+    "src/watson/static/settings.css",
     "src/watson/static/watson.js",
 }
 
