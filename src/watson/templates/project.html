@@ -8,9 +8,10 @@
     <li aria-current="page"><span>{{ project.name }}</span></li>
   </ol>
 </nav>
+{% set active_tab = 'overview' %}{% include "_project_tabs.html" %}
 
 <div class="page-heading">
-  <div>
+  <div class="project-input-stack">
     <h1 class="page-title">{{ project.name }}</h1>
     <p class="lede">{{ inputs|length }} input{% if inputs|length != 1 %}s{% endif %} · Model {{ model }}</p>
   </div>
@@ -18,7 +19,6 @@
     <a class="btn" data-variant="outline" href="{{ url('projects/' + project.id + '/settings') }}">Settings</a>
     <form action="{{ url('projects/' + project.id + '/open-folder') }}" method="post"><button class="btn" data-variant="outline" type="submit">Open folder</button></form>
     {% if summary.has_result %}<a class="btn" data-variant="outline" href="{{ url('projects/' + project.id + '/download.zip') }}">Download results</a>{% endif %}
-    {% if summary.reports %}{% set primary_report = summary.reports|last %}<a class="btn" href="{{ url('projects/' + project.id + '/reports/' + primary_report.kind) }}">Read report</a>{% endif %}
   </div>
 </div>
 
@@ -26,18 +26,10 @@
 {% if error %}<div class="alert" data-variant="destructive" role="alert"><section><p>{{ error }}</p></section></div>{% endif %}
 
 {% if summary.has_result %}
-<section class="result-strip" aria-label="Result summary">
-  <div><strong>{{ summary.files }}</strong><span>Documents</span></div>
-  <div><strong>{{ summary.studies }}</strong><span>Studies found</span></div>
-  <div><strong>{{ summary.ready }}</strong><span>Ready to check</span></div>
-  <div><strong>{{ summary.checked }}</strong><span>Studies checked</span></div>
-  <div><strong>{{ summary.missing }}</strong><span>Missing prereg items</span></div>
-  <div><strong>{{ summary.unregistered }}</strong><span>Not preregistered</span></div>
-  <div><strong>{{ summary.deviations }}</strong><span>Deviations</span></div>
-  <div><strong>{{ summary.degrees_of_freedom }}</strong><span>Degrees of freedom</span></div>
-  <div class="{% if summary.failed %}danger-number{% endif %}"><strong>{{ summary.failed }}</strong><span>Failed</span></div>
+<section class="result-teaser" aria-label="Result summary">
+  <div><strong>Results ready</strong><p>{{ summary.files }} document{% if summary.files != 1 %}s{% endif %} · {{ summary.studies }} {% if summary.studies == 1 %}study{% else %}studies{% endif %} found · {{ summary.checked }} checked</p></div>
+  <a class="btn" href="{{ url('projects/' + project.id + '/results') }}">View results</a>
 </section>
-{% if summary.usage %}<p class="resource-line">Last run: {{ summary.usage.requests|default(0) }} model request{% if summary.usage.requests|default(0) != 1 %}s{% endif %} · {{ summary.usage.total_tokens|default(0) }} total tokens</p>{% endif %}
 {% else %}
 <section class="next-step">
   <span class="step-badge">1</span>
@@ -53,23 +45,25 @@
 </section>
 {% else %}
 <section class="card run-panel">
-  <div class="run-copy"><h2>Run Watson</h2><p>{% if credential_loaded %}Retries continue missing or failed work. A complete rerun replaces completed study checks.{% else %}Watson has not loaded an API key for this session. <a href="{{ url('settings') }}">Explicitly load it in Settings</a>; this page will never access the system credential store.{% endif %}</p></div>
+  <div class="run-copy"><h2>Run Watson</h2><p>{% if credential_loaded %}Completed work is skipped unless you choose to overwrite it.{% else %}Watson reads your saved API key only when processing starts. <a href="{{ url('settings') }}">Save a key in Settings</a> before running a check.{% endif %}</p></div>
   <form class="run-controls" action="{{ url('projects/' + project.id + '/runs') }}" method="post">
     <select class="select" name="action" aria-label="Processing step">
-      <option value="all">Inventory + preregistration check</option>
-      <option value="inventory">Inventory only</option>
-      <option value="deviation">Preregistration check only</option>
+      {% if not inputs %}<option value="" selected disabled>Choose checks</option>{% endif %}
+      <option value="all_with_code" {% if not inputs or not code_files %}disabled{% else %}selected{% endif %}>All checks</option>
+      <option value="all" {% if not inputs %}disabled{% elif not code_files %}selected{% endif %}>Inventory + preregistration check</option>
+      <option value="inventory" {% if not inputs %}disabled{% endif %}>Inventory only</option>
+      <option value="deviation" {% if not can_run_preregistration %}disabled{% endif %}>Preregistration check only</option>
+      <option value="deviation_with_code" {% if not can_run_preregistration or not code_files %}disabled{% endif %}>Preregistration check + code audit</option>
+      <option value="code_audit" {% if not can_run_code_audit %}disabled{% endif %}>Code audit only</option>
     </select>
-    <select class="select" name="retry_mode" aria-label="Retry behavior">
-      <option value="failed">Continue failed or missing work</option>
-      <option value="all">Complete rerun</option>
-    </select>
-    <button class="btn" type="submit" {% if not inputs or not credential_loaded %}disabled{% endif %}>Start processing</button>
+    <label class="run-overwrite"><input type="checkbox" name="overwrite_completed" value="yes"><span><strong>Overwrite completed results</strong><small>Otherwise completed work is skipped</small></span></label>
+    <button class="btn" type="submit" {% if not inputs %}disabled{% endif %}>Start processing</button>
   </form>
 </section>
 {% endif %}
 
 <div class="two-column">
+  <div class="project-document-stack">
   <div class="card">
     <header><div><h2>Input documents</h2><p class="muted">{{ supported_types }}</p></div></header>
     <section>
@@ -79,7 +73,7 @@
         <span class="dropzone-icon" aria-hidden="true">↓</span>
         <div class="dropzone-copy">
           <label for="file-input"><strong>Drop files here</strong></label>
-          <span>PDF, text, CSV, HTML, XML, JSON, or RTF · up to {{ max_file_mb }} MB each</span>
+          <span>PDF, text, CSV, HTML, XML, JSON, or RTF · up to {{ max_file_mb }} MB each · uploads start automatically</span>
         </div>
         <button class="btn" type="button" data-file-picker {% if active_job %}disabled{% endif %}>Add files</button>
       </div>
@@ -105,15 +99,25 @@
     </section>
   </div>
 
+  <div class="card">
+    <header><div><h2>Code audit</h2><p class="muted">Checks each reported analysis against the manuscript and preregistration. Source files are never executed.</p></div></header>
+    <section>
+      <form class="dropzone-form" data-code-dropzone action="{{ url('projects/' + project.id + '/code') }}" method="post" enctype="multipart/form-data">
+        <input id="code-input" type="file" name="files" multiple hidden {% if active_job %}disabled{% endif %}>
+        <input id="code-folder-input" type="file" name="files" webkitdirectory multiple hidden {% if active_job %}disabled{% endif %}>
+        <div class="dropzone-surface"><div class="dropzone-copy"><label for="code-input"><strong>Drop code files or folders here</strong></label><span>Source and configuration files only</span></div><button class="btn" type="button" data-code-picker {% if active_job %}disabled{% endif %}>Add files</button><button class="btn" data-variant="outline" type="button" data-code-folder-picker {% if active_job %}disabled{% endif %}>Choose folder</button></div>
+        <div class="dropzone-selection" aria-live="polite"><span data-code-selection>No code selected</span><button class="btn" data-variant="outline" type="submit" data-code-submit disabled>Upload code</button></div>
+        <ul class="muted" data-code-preview hidden></ul>
+      </form>
+      {% if code_files %}<div class="file-list">{% for file in code_files %}<div class="file-row"><span class="file-kind">{{ file.extension[1:]|upper }}</span><div><strong>{{ file.path }}</strong><small>{{ (file.size_bytes / 1024)|round(1) }} KB</small></div><form action="{{ url('projects/' + project.id + '/code/delete') }}" method="post"><input type="hidden" name="path" value="{{ file.path }}"><button class="btn" data-variant="ghost" type="submit" {% if active_job %}disabled{% endif %}>×</button></form></div>{% endfor %}</div>{% endif %}
+    </section>
+  </div>
+  </div>
+
   <aside>
     <div class="card compact">
       <header><div><h2>Reports and downloads</h2><p class="muted">Read here or save a copy</p></div></header>
       <section>
-      {% if summary.reports %}
-      <div class="browser-report-list">
-        {% for report in summary.reports %}<a href="{{ url('projects/' + project.id + '/reports/' + report.kind) }}"><span>⌘</span><strong>{{ report.label }}</strong><b>→</b></a>{% endfor %}
-      </div>
-      {% endif %}
       {% if summary.downloads %}
       <div class="download-list">
         {% for filename in summary.downloads %}<a href="{{ url('projects/' + project.id + '/downloads/' + filename) }}"><span>{{ filename }}</span><b>↓</b></a>{% endfor %}
@@ -133,22 +137,4 @@
   </aside>
 </div>
 
-{% if summary.warnings %}
-<details class="warning-card" open>
-  <summary><span>Warnings and review notes</span><span class="badge" data-variant="outline">{{ summary.warnings|length }}</span></summary>
-  <ul>{% for warning in summary.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
-</details>
-{% endif %}
-
-{% if summary.items %}
-<div class="card study-results-card">
-  <header><div><h2>Study results</h2><p class="muted">Select a study to read its assessment and specific findings</p></div></header>
-  <section>
-  <div class="study-browser">
-    {% for item in items %}{% include "_study_result.html" %}{% endfor %}
-  </div>
-  {% if item_pages > 1 %}<nav class="pagination">{% if item_page > 1 %}<a href="{{ url('projects/' + project.id) }}?item_page={{ item_page - 1 }}">Previous</a>{% endif %}<span>Page {{ item_page }} of {{ item_pages }}</span>{% if item_page < item_pages %}<a href="{{ url('projects/' + project.id) }}?item_page={{ item_page + 1 }}">Next</a>{% endif %}</nav>{% endif %}
-  </section>
-</div>
-{% endif %}
 {% endblock %}

@@ -29,6 +29,7 @@
     </div>
   </header>
   <main class="shell">
+    {% if update_available %}<div class="alert alert-warning" role="status"><section><p>A Watson update is available. <a href="https://shaheedazaad.github.io/watson/" target="_blank" rel="noopener">Read the update instructions in the documentation.</a></p></section></div>{% endif %}
     {% block content %}{% endblock %}
   </main>
 </body>

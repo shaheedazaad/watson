@@ -34,14 +34,21 @@
 </div>
 {% endif %}
 
+{% if report.kind == 'code-audit' %}
+<div class="card"><header><div><h2>Audit findings</h2><p class="muted">Citations are verified against uploaded source.</p></div></header><section>
+<div class="code-audit-studies">{% for audit in report.audits %}{% include "_code_audit_study.html" %}{% else %}<p class="muted">No audit results are available.</p>{% endfor %}</div>
+</section></div>
+{% endif %}
+
 {% if report.studies %}<nav class="study-index" aria-label="Studies in this report">{% for item in report.studies %}<a href="#{{ item.anchor }}"><span>{{ item.label }}</span>{% if item.deviations is not none %}<b>{{ item.deviations }}</b>{% endif %}</a>{% endfor %}</nav>{% endif %}
 
-<div class="card report-studies">
+{% if report.kind != 'code-audit' %}<div class="card report-studies">
   <header><div><h2>{% if report.kind == 'inventory' %}Studies and matches{% else %}Study findings{% endif %}</h2><p class="muted">Select a study to read the full detail</p></div></header>
   <section>
   <div class="study-browser">{% for item in report.studies %}{% include "_study_result.html" %}{% else %}<p class="muted">No study results are available.</p>{% endfor %}</div>
   </section>
 </div>
+{% endif %}
 
 {% if report.skipped_studies %}
 <div class="card">

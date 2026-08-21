@@ -135,6 +135,10 @@ def save_deviation_run(path: Path, run: DeviationCheckRun) -> None:
     path.write_text(run.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
 
+def load_deviation_run(path: Path) -> DeviationCheckRun:
+    return DeviationCheckRun.model_validate_json(path.read_text(encoding="utf-8"))
+
+
 def validate_report_deviation_types(
     report: StudyDeviationReport,
     guide: DeviationGuide,
@@ -291,7 +295,7 @@ def render_inventory_coverage(report: StudyDeviationReport) -> list[str]:
 
 
 def render_missing_preregistered_items(report: StudyDeviationReport) -> list[str]:
-    lines = ["#### 1. Missing Preregistered Items", ""]
+    lines = ["#### 1. Preregistered But Not Reported", "", "These commitments appear in the preregistration but not in the article or supplements.", ""]
     if not report.missing_preregistered_items:
         lines.extend(["Every preregistered item was located in the article or supplements.", ""])
         return lines
@@ -329,7 +333,7 @@ def render_missing_preregistered_items(report: StudyDeviationReport) -> list[str
 
 
 def render_unregistered_article_items(report: StudyDeviationReport) -> list[str]:
-    lines = ["#### 2. Reported But Not Preregistered", ""]
+    lines = ["#### 2. Reported But Not Preregistered", "", "These actions appear in the article or supplements but not in the preregistration.", ""]
     if not report.unregistered_article_items:
         lines.extend(["Everything reported in the article was traced to the preregistration.", ""])
         return lines
@@ -366,7 +370,7 @@ def render_unregistered_article_items(report: StudyDeviationReport) -> list[str]
 
 
 def render_deviations(report: StudyDeviationReport) -> list[str]:
-    lines = ["#### 3. Deviations", ""]
+    lines = ["#### 3. Preregistered And Reported Differently", "", "These items appear in both sources, but the reported method differs from the preregistered plan.", ""]
     if not report.deviations:
         lines.extend(["No deviations were reported by the model.", ""])
         return lines
@@ -438,11 +442,7 @@ def render_degrees_of_freedom(report: StudyDeviationReport) -> list[str]:
                 "",
                 f"What is left open: {finding.underspecification}",
                 "",
-                f"Defensible alternatives the wording permits: {finding.plausible_alternatives or 'Not reported'}",
-                "",
                 f"What the article did: {finding.article_choice or 'Not reported'}",
-                "",
-                f"Potential impact: {finding.potential_impact or 'Not reported'}",
                 "",
                 f"Evidence: {finding.evidence or 'Not reported'}",
                 "",

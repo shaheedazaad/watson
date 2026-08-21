@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, TypeVar
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from watson.deviation_guide import DeviationGuide, build_deviation_system_prompt
 from watson.file_context import build_file_context_prompt
@@ -27,6 +27,18 @@ from watson.schemas import (
     StudyMapEntry,
     StudyExtractionResult,
     StudyRecord,
+    CodeAuditAnalysis,
+    CodeAuditCheck,
+    CodeAuditFinding,
+    CodeAuditResult,
+    CodeCitation,
+)
+from watson.code_audit import (
+    align_findings,
+    constrain_analysis_scope,
+    excerpts,
+    manifest,
+    verify,
 )
 from watson.scanner import hash_file
 from watson.text_extractors import extract_text
@@ -65,6 +77,27 @@ class GeminiError(RuntimeError):
 class ContextCacheRecord(BaseModel):
     name: str
     expires_at: datetime
+
+class CodeExcerptRequest(BaseModel):
+    requests: list[CodeCitation] = Field(default_factory=list)
+
+
+class CodeAuditPlan(BaseModel):
+    analyses: list[CodeAuditAnalysis] = Field(default_factory=list)
+    requests: list[CodeCitation] = Field(default_factory=list)
+
+
+class CitedCodeAuditCheck(CodeAuditCheck):
+    citations: list[CodeCitation] = Field(min_length=1)
+
+
+class CitedCodeAuditFinding(CodeAuditFinding):
+    manuscript_check: CitedCodeAuditCheck
+    preregistration_check: CitedCodeAuditCheck
+
+
+class CitedCodeAuditResult(CodeAuditResult):
+    findings: list[CitedCodeAuditFinding] = Field(default_factory=list)
 
 
 class GeminiResearchClient:
@@ -277,6 +310,57 @@ when no candidate fits, and "needs_review" when evidence is too weak.
             review_notes=review_notes,
             stage_errors=stage_errors,
         )
+
+    def audit_code(
+        self,
+        root: Path,
+        code_dir: Path,
+        study: StudyMapEntry,
+        guide: DeviationGuide,
+        preregistration_inventory: PreregistrationInventory | None,
+        article_inventory: ArticleInventory | None,
+    ) -> CodeAuditResult:
+        """Run three bounded audit requests; source is never executed."""
+        if not study.matched_preregistration_file_path:
+            raise GeminiError("Study has no matched preregistration.")
+        prereg, article, supplement_paths = self._study_documents(root, study)
+        cache = self._ensure_study_cache(study, guide, [prereg, *article])
+        inventory_requests = 0
+        if preregistration_inventory is None:
+            preregistration_inventory = self._inventory_preregistration(
+                study, guide, prereg, cache
+            )
+            inventory_requests += 1
+        if article_inventory is None:
+            article_inventory = self._inventory_article(
+                study, guide, article, supplement_paths, cache
+            )
+            inventory_requests += 1
+        source_manifest = manifest(code_dir)
+        first_prompt = build_code_audit_plan_prompt(
+            study, article_inventory, source_manifest
+        )
+        first = self._generate_json(first_prompt, CodeAuditPlan, cache)
+        first.analyses = constrain_analysis_scope(first.analyses, article_inventory)
+        access1, text1 = excerpts(code_dir, first.requests)
+        second_prompt = build_code_audit_followup_prompt(first.analyses, text1)
+        second = self._generate_json(second_prompt, CodeExcerptRequest, cache)
+        access2, text2 = excerpts(code_dir, second.requests)
+        final_prompt = build_code_audit_final_prompt(
+            first.analyses,
+            preregistration_inventory,
+            article_inventory,
+            text1,
+            text2,
+        )
+        cited_result = self._generate_json(final_prompt, CitedCodeAuditResult, cache)
+        result = CodeAuditResult.model_validate(cited_result.model_dump())
+        result.study_id = study.study_id; result.study_label = study.label; result.access_log = access1 + access2
+        result.resource_usage.requests = 3 + inventory_requests
+        result.resource_usage.files_read = len({citation.path for citation in result.access_log})
+        result.resource_usage.lines_read = sum(citation.end_line - citation.start_line + 1 for citation in result.access_log)
+        result.resource_usage.excerpt_characters = len(text1) + len(text2)
+        return verify(align_findings(result, first.analyses), code_dir)
 
     def _study_documents(
         self,
@@ -676,6 +760,111 @@ def dedupe_notes(values: list[str]) -> list[str]:
     return result
 
 
+def build_code_audit_plan_prompt(
+    study: StudyMapEntry,
+    article_inventory: ArticleInventory,
+    source_manifest: list[dict[str, object]],
+) -> str:
+    """Build the paper-scoped analysis inventory and initial source request."""
+    return f"""
+Plan a source-only code audit for this study.
+
+Study metadata:
+{study.model_dump_json(indent=2)}
+
+Authoritative article and supplemental-material inventory:
+{article_inventory.model_dump_json(indent=2)}
+
+Available source files (metadata only):
+{json.dumps(source_manifest, indent=2)}
+
+First derive the inventory of analyses reported in the article or supplemental
+materials from the supplied article inventory. An analysis is a distinct
+statistical/model/result-bearing computation. Group atomic inventory items that
+describe the same analysis, including its outcome, exclusions, transformations,
+predictors, covariates, corrections, and robustness framing. Include analyses
+reported only in supplemental materials. Assign stable analysis_id values C1,
+C2, and so on; copy every supporting A-item ID into article_item_ids and capture
+the documentary description and evidence.
+
+This paper-derived list is the complete scope of the audit. Do not add an
+analysis merely because it appears in the code, and do not add an analysis that
+appears only in the preregistration. Missing preregistered analyses and standalone
+unreported code analyses are handled by the preregistration check elsewhere.
+
+Then request precise code paths and line ranges needed to audit every listed
+analysis. Return JSON matching the requested schema. Do not make findings yet.
+"""
+
+
+def build_code_audit_followup_prompt(
+    analyses: list[CodeAuditAnalysis],
+    first_excerpts: str,
+) -> str:
+    return f"""
+The reported-analysis inventory is fixed:
+{json.dumps([item.model_dump() for item in analyses], indent=2)}
+
+Source excerpts supplied so far:
+{first_excerpts or "none"}
+
+Request only precise additional source paths and line ranges essential to answer
+both implementation-fidelity questions for these analyses. Do not expand the
+analysis inventory. Return JSON matching the requested schema.
+"""
+
+
+def build_code_audit_final_prompt(
+    analyses: list[CodeAuditAnalysis],
+    preregistration_inventory: PreregistrationInventory,
+    article_inventory: ArticleInventory,
+    first_excerpts: str,
+    second_excerpts: str,
+) -> str:
+    return f"""
+Return the final source-only code audit.
+
+Fixed inventory of reported analyses:
+{json.dumps([item.model_dump() for item in analyses], indent=2)}
+
+Article and supplemental-material inventory:
+{article_inventory.model_dump_json(indent=2)}
+
+Preregistration inventory:
+{preregistration_inventory.model_dump_json(indent=2)}
+
+Source excerpts:
+{first_excerpts or "none"}
+
+{second_excerpts or "none"}
+
+Return exactly one finding for every analysis in the fixed inventory, in the same
+order, and no other findings. Copy its analysis object exactly. Each finding has
+exactly these two independent checks:
+
+1. manuscript_check: Did the code implement this analysis exactly as reported in
+   the article or supplemental materials? Mark deviates for a conflicting or
+   undisclosed implementation step that affects this reported analysis; matches
+   only when the supplied source supports the reported account.
+2. preregistration_check: Did the code implement this analysis exactly as
+   preregistered? Mark deviates for any implemented choice or step not specified
+   by, or conflicting with, the preregistration; matches only when the supplied
+   source supports the preregistered account.
+
+For each check, status must be matches, deviates, or unclear. Give a specific
+rationale and at least one concise source citation. Every citation must use a
+path and exact numbered line range supplied in the source excerpts. Keep ranges
+focused (ideally 12 lines or fewer) and set quote to an empty string; Watson will
+retrieve and verify the exact quote. A matches or deviates judgment without a
+source citation is invalid and will be downgraded to unclear. If the source
+excerpts are insufficient, use unclear; never infer unseen code. Do not turn a
+standalone code-only analysis or a missing preregistered analysis into a finding.
+Those inventory-gap checks belong to the separate preregistration check.
+
+Return JSON matching the requested schema.
+"""
+
+
 # ----------------------------------------------------------------------
 # Stage prompts
 # ----------------------------------------------------------------------
@@ -877,9 +1066,7 @@ For each finding:
 - prereg_item_id and category: copied from the stage 1 item.
 - preregistered_plan: what the preregistration actually says.
 - underspecification: precisely which decision is left open.
-- plausible_alternatives: the defensible choices the wording still permits.
 - article_choice: which one the article took, or "not reported".
-- potential_impact: how the open choice could move the reported result.
 - evidence: the preregistration location and quote.
 - severity: high when the open choice could plausibly flip a reported
   conclusion, medium when it could move an estimate materially, low otherwise.

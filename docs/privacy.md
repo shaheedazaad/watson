@@ -18,10 +18,10 @@ Watson needs a Gemini API key to run checks, since the model itself is Google's,
 
 Watson talks to these stores directly — it doesn't go through a configurable backend that could be redirected to a plaintext file. The key is never written into a project file, and it's excluded from any exports or downloaded archives.
 
-Watson never reads the credential store on its own — not at launch, not on page load, not after an update. You have to explicitly click **Load** in Settings each time you want the current session to use the saved key. After that, the key lives only in the app's memory for as long as it's running; closing Watson clears it. This also means that after an update, your operating system's usual "an app wants to access your keychain" prompt is expected the next time you load the key — it's Watson asking for the key you already told it to save, not a new or unexpected request.
+Watson never reads the credential store on its own — not at launch, on page load, or after an update. It reads the saved key only after you start a run that needs it. After that, the key lives only in the app's memory for as long as Watson is running; closing Watson clears it. If an update changes the installed app identity, your operating system may ask you to approve that first run's Keychain access.
 
 ## What this means day to day
 
 - Adding files, browsing results, renaming a project — none of it touches the network.
 - The only outbound call Watson makes is the one you start on purpose, and only for the documents in that run.
-- If you never save an API key, or never click Load, Watson simply can't run a check — there's no path where it uses a key without you having explicitly loaded it for that session.
+- If you never save an API key, Watson simply can't run a check — there is no credential-store access until you start one.

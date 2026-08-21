@@ -39,11 +39,13 @@ A project is just a folder Watson keeps on your computer to hold one study's fil
 
 ## 3. Add your documents
 
-Open the project and drop in the files. At minimum you need the article; add the preregistration too so Watson has something to compare it against, and any supplemental materials (analysis code, appendices, extra reporting) that might contain relevant detail.
+Open the project and drop in the files. At minimum you need the article; add the preregistration too so Watson has something to compare it against, and any supplemental materials (appendices or extra reporting) that might contain relevant detail.
 
 ![A project page with three PDF files added: the article, the preregistration, and a supplemental file](assets/screenshots/project-overview.png)
 
 Watson accepts PDF, TXT, CSV, HTML, XML, JSON, and RTF files, up to 50 MB each.
+
+If you want an optional code audit, use the separate **Code audit** panel to add analysis source files or a source folder. Watson stores and inspects source text but never executes it. See [Code audit](code-audit.md) for what this review checks.
 
 !!! tip "Ambiguous file names?"
     If your file names don't make each document's role obvious, open the project's own **Settings** and add a note under "Notes for Watson" — for example, which file is the main article and which preregistration covers which study. This can improve accuracy for projects with several studies or files.
@@ -56,27 +58,27 @@ Watson uses Google's Gemini model to read your documents, so it needs an API key
 
 ![The global Settings page, with a field to paste a Gemini API key and a button to save it to the system credential store](assets/screenshots/global-settings.png)
 
-Click **Save to Keychain** (the button name matches whatever your operating system's credential store is called). This does two things at once: it stores the key securely for next time, and it loads it into memory for your current session — so you're ready to run a check right away. See [Privacy and API keys](privacy.md) for the full explanation of when and how the key is used.
+Click **Save to Keychain** (the button name matches whatever your operating system's credential store is called). This stores the key securely for next time. Watson reads it only when you start a check, not when the app opens or when you browse its pages. See [Privacy and API keys](privacy.md) for the full explanation of when and how the key is used.
 
 !!! note "If you restart Watson"
-    The key stays saved, but each new session starts without it loaded — that's deliberate, so Watson never touches your system credential store on its own. Just come back to this Settings page and click **Load from Keychain**; you won't need to paste the key again.
+    The key stays saved. Start a check whenever you're ready; that is the only time Watson reads it. After an app update, your operating system may ask you to approve that first Keychain access.
 
 ## 5. Start processing
 
-Back on the project page, choose what to run — usually "Inventory + preregistration check" — and click **Start processing**. You'll see live progress as Watson works through each stage.
+Back on the project page, choose what to run — usually **Inventory + preregistration check** — and click **Start processing**. You'll see live progress as Watson works through each stage. After that check completes, you can run the optional code audit alongside a preregistration check or by itself.
 
 This is the only point at which anything leaves your computer: your document text is sent to Gemini for this run, and nothing else.
 
 ## 6. Read the results
 
-When it finishes, open **Results** for a summary of every study Watson found, or **Read report** for the full write-up.
+When it finishes, open **Results** for a summary of every study Watson found. Choose the **Preregistration** tab for the document comparison, or the **Code audit** tab if you ran the optional source review.
 
 ![The results page for a project, showing summary counts and a list of studies with their findings](assets/screenshots/results.png)
 
-Each study expands into its specific findings — missing items, unregistered items, deviations, and degrees of freedom — with the exact wording from both the preregistration and the article, so you can verify Watson's read for yourself.
+Each study expands into its specific findings — preregistered but not reported, reported but not preregistered, reported differently from the preregistration, and degrees of freedom — with the exact wording from both sources, so you can verify Watson's read for yourself.
 
 ![The preregistration adherence report for a project, listing two studies and their findings](assets/screenshots/report-preregistration.png)
 
 You can download the full report as Markdown, or download all the underlying data (machine-readable JSON plus the source documents) from the project page.
 
-Next: [The preregistration check](preregistration-check.md) explains what Watson is actually doing at each stage, so you know how much to trust — and how to sanity-check — what it reports.
+Next: [The preregistration check](preregistration-check.md) and [Code audit](code-audit.md) explain what Watson is actually doing, so you know how much to trust — and how to sanity-check — what it reports.

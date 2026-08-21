@@ -23,7 +23,8 @@
     {% if item.review_notes %}<div class="inline-notes"><h4>Review notes</h4><ul>{% for note in item.review_notes %}<li>{{ note }}</li>{% endfor %}</ul></div>{% endif %}
 
     {% if item.missing_items %}
-    <h4 class="finding-section-title">1. Missing preregistered items <span class="finding-count">{{ item.missing_items|length }}</span></h4>
+    <h4 class="finding-section-title">1. Preregistered but not reported <span class="finding-count">{{ item.missing_items|length }}</span></h4>
+    <p class="finding-section-description">Watson found this in the preregistration, but not in the article or supplements.</p>
     <div class="finding-list">
       {% for finding in item.missing_items %}
       <article class="finding-card" data-section="missing">
@@ -45,6 +46,7 @@
 
     {% if item.unregistered_items %}
     <h4 class="finding-section-title">2. Reported but not preregistered <span class="finding-count">{{ item.unregistered_items|length }}</span></h4>
+    <p class="finding-section-description">Watson found this in the article or supplements, but not in the preregistration.</p>
     <div class="finding-list">
       {% for finding in item.unregistered_items %}
       <article class="finding-card" data-section="unregistered">
@@ -65,7 +67,8 @@
     {% endif %}
 
     {% if item.findings %}
-    <h4 class="finding-section-title">3. Deviations <span class="finding-count">{{ item.findings|length }}</span></h4>
+    <h4 class="finding-section-title">3. Preregistered and reported differently <span class="finding-count">{{ item.findings|length }}</span></h4>
+    <p class="finding-section-description">Watson found this in both sources, but the reported method differs from the preregistered plan.</p>
     <div class="finding-list">
       {% for finding in item.findings %}
       <article class="finding-card" data-section="deviation">
@@ -106,10 +109,6 @@
           <section><h5>What the article did</h5><p>{{ finding.article_choice or 'Not reported' }}</p></section>
         </div>
         <section class="finding-evidence"><h5>Evidence</h5><p>{{ finding.evidence or 'No evidence text was returned.' }}</p></section>
-        <dl class="finding-flags">
-          <div><dt>Defensible alternatives</dt><dd>{{ finding.plausible_alternatives or 'Not reported' }}</dd></div>
-          <div><dt>Potential impact</dt><dd>{{ finding.potential_impact or 'Not reported' }}</dd></div>
-        </dl>
       </article>
       {% endfor %}
     </div>

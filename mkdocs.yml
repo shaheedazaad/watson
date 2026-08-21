@@ -17,6 +17,7 @@ nav:
   - Welcome: index.md
   - Getting started: quickstart.md
   - The preregistration check: preregistration-check.md
+  - Code audit: code-audit.md
   - Privacy and API keys: privacy.md
   - Command line (advanced): cli.md
 

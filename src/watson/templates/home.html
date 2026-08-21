@@ -15,6 +15,7 @@
   </form>
 </div>
 
+<div class="alert alert-warning" role="note"><section><p>Watson is an unvalidated tool to help audit preregistrations. It is not designed to be used unattended to make judgements about a paper. Treat its output as prompts for verification against the original documents.</p></section></div>
 {% if error %}<div class="alert" data-variant="destructive" role="alert"><section><p>{{ error }}</p></section></div>{% endif %}
 
 <div class="section-head">
@@ -34,7 +35,7 @@
   <thead><tr><th>Project</th><th>Inputs</th><th>Progress</th><th>Last run</th><th>Updated</th></tr></thead>
   <tbody>
     {% for summary in projects %}
-    <tr>
+    <tr class="project-row" data-project-href="{{ url('projects/' + summary.metadata.id) }}" tabindex="0">
       <td><a class="project-link" href="{{ url('projects/' + summary.metadata.id) }}">{{ summary.metadata.name }}</a></td>
       <td>{{ summary.input_count }}</td>
       <td class="muted">

@@ -1,0 +1,6 @@
+<nav class="project-tabs" aria-label="Project sections">
+  <a class="{% if active_tab == 'overview' %}active{% endif %}" href="{{ url('projects/' + project.id) }}">Overview</a>
+  <a class="{% if active_tab == 'results' %}active{% endif %}" href="{{ url('projects/' + project.id + '/results') }}">
+    Results{% if summary.has_result %}<span class="tab-indicator ready" aria-label="Results ready">Ready</span>{% endif %}
+  </a>
+</nav>

@@ -31,12 +31,12 @@ Watson binds only to `127.0.0.1`, selects an available port, creates a new rando
 In the browser:
 
 1. Create a named project.
-2. Add the article, preregistration, and relevant supplemental files.
-3. Open project settings to save the Gemini API key in the operating-system credential store and load it for the current Watson session.
+2. Add the article, preregistration, and relevant supplemental files. Optionally add analysis source files in the separate Code audit panel; Watson inspects them but never executes them.
+3. Open project settings to save the Gemini API key in the operating-system credential store.
 4. Start processing and follow live progress.
-5. Read the inventory and preregistration reports in the browser, expand individual studies to inspect every finding, or download reports and machine-readable data.
+5. Read the inventory, preregistration, and optional code-audit results in the browser, expand individual studies to inspect every finding, or download reports and machine-readable data.
 
-Projects live in the normal per-user application-data directory. The browser workflow never requires editing that directory. API keys are stored in macOS Keychain, Windows Credential Manager, or Linux Secret Service. Watson selects these native stores directly, so keyring configuration cannot redirect the key to a plaintext backend. Watson never reads the credential store during launch, page loads, updates, or processing. The user must explicitly save or load the key in project settings; after an update, the same explicit load action reconnects the saved key and makes any operating-system permission prompt expected. Once loaded, the key remains only in process memory until Watson closes. Credentials are never included in project files or exports.
+Projects live in the normal per-user application-data directory. The browser workflow never requires editing that directory. API keys are stored in macOS Keychain, Windows Credential Manager, or Linux Secret Service. Watson selects these native stores directly, so keyring configuration cannot redirect the key to a plaintext backend. Watson never reads the credential store during launch, page loads, or updates; it reads the saved key only when you start a run. Once read, the key remains only in process memory until Watson closes. Credentials are never included in project files or exports.
 
 Supported inputs are PDF, TXT, CSV, HTML/HTM, XML, JSON, and RTF. Each file is limited to 50 MB and each upload request to 200 MB.
 
@@ -51,6 +51,10 @@ For each study with a matched preregistration, Watson runs four separate model r
 
 The report carries all four as separate sections, plus both inventories as appendices. Each study's documents are uploaded once and held in a Gemini context cache shared by all four stages, so the article and preregistration are not re-sent per request; when the API declines to cache them, Watson attaches the documents to each stage instead.
 
+## Optional code audit
+
+After the inventory and preregistration check completes, upload analysis source files in the project's **Code audit** panel. Watson compares each analysis reported in the paper against the manuscript and preregistration, with verified source-file and line-range citations. It never executes uploaded code or reads raw data. See the [Code audit guide](https://shaheedazaad.github.io/watson/code-audit/) for prerequisites, interpretation, and limits.
+
 ## Reproducible command-line runs
 
 The noninteractive command calls the same runner as the browser app:
@@ -58,8 +62,8 @@ The noninteractive command calls the same runner as the browser app:
 ```sh
 watson projects list
 GEMINI_API_KEY=... watson run PROJECT_ID --action all
-# Or explicitly permit this command to read the saved system credential:
-watson run PROJECT_ID --action all --use-keychain
+# Or use the saved system credential when the run starts:
+watson run PROJECT_ID --action all
 ```
 
 By default, a rerun processes only missing or failed work. Use `--retry-all` for a complete rerun. Each successful run writes `reproducibility.json` with the effective model, thinking level, seed, concurrency, platform, and relevant package versions. Result archives include source documents, machine-readable results, reports, and this metadata; credentials and Gemini upload-cache identifiers are excluded.

@@ -153,9 +153,7 @@ def stage_payloads() -> list[str]:
                     category="exclusion_criteria",
                     preregistered_plan="Outliers will be removed.",
                     underspecification="No definition or cutoff for an outlier is given.",
-                    plausible_alternatives="2 SD, 2.5 SD, 3 SD, IQR-based, or no removal.",
                     article_choice="3 SD",
-                    potential_impact="Different cutoffs change which participants are analysed.",
                     evidence="prereg.pdf p. 2",
                     severity="high",
                 )
@@ -271,12 +269,13 @@ def test_report_markdown_carries_all_four_sections(tmp_path: Path) -> None:
 
     markdown = "\n".join(render_study_report(report))
 
-    assert "#### 1. Missing Preregistered Items" in markdown
+    assert "#### 1. Preregistered But Not Reported" in markdown
     assert "#### 2. Reported But Not Preregistered" in markdown
-    assert "#### 3. Deviations" in markdown
+    assert "#### 3. Preregistered And Reported Differently" in markdown
     assert "#### 4. Preregistration Degrees Of Freedom" in markdown
     assert "A mediation analysis will be run." in markdown
-    assert "2 SD, 2.5 SD, 3 SD, IQR-based, or no removal." in markdown
+    assert "Defensible alternatives" not in markdown
+    assert "Potential impact" not in markdown
     assert "<summary>Preregistration inventory</summary>" in markdown
     assert "Preregistered commitments inventoried: 2 (2 not fully specified)" in markdown
 

@@ -1,0 +1,50 @@
+<details class="code-audit-study" open>
+  <summary>
+    <div>
+      <strong>{{ audit.study_label }}</strong>
+      <small>{{ audit.findings|length }} reported analys{% if audit.findings|length == 1 %}is{% else %}es{% endif %}</small>
+    </div>
+    {% if audit.status == 'failed' %}<span class="badge" data-variant="destructive">Needs rerun</span>{% else %}<span class="badge" data-variant="secondary">{{ audit.status }}</span>{% endif %}
+    <span class="disclosure-arrow" aria-hidden="true">⌄</span>
+  </summary>
+  <div class="code-audit-study-body">
+    {% if audit.status == 'failed' %}
+      {% include "_code_audit_failure.html" %}
+    {% elif audit.findings %}
+      <div class="code-analysis-list">
+      {% for finding in audit.findings %}
+        <article class="code-analysis-card">
+          <header>
+            <span>{{ finding.analysis.analysis_id }}</span>
+            <div>
+              <h3>{{ finding.analysis.reported_analysis }}</h3>
+              {% if finding.analysis.article_item_ids %}<small>Paper inventory: {{ finding.analysis.article_item_ids|join(', ') }}</small>{% endif %}
+            </div>
+          </header>
+          {% if finding.analysis.article_evidence %}<p class="code-analysis-evidence"><strong>Reported evidence</strong>{{ finding.analysis.article_evidence }}</p>{% endif %}
+          <div class="code-audit-checks">
+          {% for label, check in [('Manuscript fidelity', finding.manuscript_check), ('Preregistration fidelity', finding.preregistration_check)] %}
+            <section class="code-audit-check" data-status="{{ check.status }}">
+              <header>
+                <h4>{{ label }}</h4>
+                <span class="audit-status {{ check.status }}">{{ check.status }}</span>
+              </header>
+              <p>{{ check.rationale or 'No rationale was returned.' }}</p>
+              {% if check.citations %}
+              <details class="code-citations">
+                <summary>{{ check.citations|length }} source citation{% if check.citations|length != 1 %}s{% endif %}</summary>
+                {% for citation in check.citations %}<div class="code-citation"><code>{{ citation.path }}:{{ citation.start_line }}–{{ citation.end_line }}</code><pre>{{ citation.quote }}</pre></div>{% endfor %}
+              </details>
+              {% endif %}
+              {% if check.note %}<p class="code-audit-note">{{ check.note }}</p>{% endif %}
+            </section>
+          {% endfor %}
+          </div>
+        </article>
+      {% endfor %}
+      </div>
+    {% else %}
+      <p class="no-findings">No reported analyses were available for code audit.</p>
+    {% endif %}
+  </div>
+</details>

@@ -21,6 +21,7 @@ from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile
 
 from watson.config import ConfigStore, CredentialStoreError, system_credential_store_name
+from watson.code_audit import failure_message as code_audit_failure_message
 from watson.deviation_check import DEVIATION_RUN_FILENAME
 from watson.file_support import supported_file_types_label
 from watson.gemini_client import DEFAULT_MODEL
@@ -37,6 +38,7 @@ from watson.projects import (
 )
 from watson.resources import assert_runtime_assets, rebuild_reports_script, static_dir, templates_dir
 from watson.runner import RunnerSettings
+from watson.updates import UpdateChecker
 
 
 def create_app(
@@ -51,6 +53,7 @@ def create_app(
     project_store = store or ProjectStore(data_dir)
     job_manager = jobs or JobManager(project_store)
     config_store = ConfigStore(project_store.data_dir)
+    update_checker = UpdateChecker(project_store.data_dir)
     templates = Environment(
         loader=FileSystemLoader(str(templates_dir())),
         autoescape=select_autoescape(("html", "xml")),
@@ -65,6 +68,7 @@ def create_app(
     app.state.project_store = project_store
     app.state.jobs = job_manager
     app.state.config = config_store
+    app.state.update_checker = update_checker
 
     @app.middleware("http")
     async def local_security(request: Request, call_next):
@@ -104,7 +108,7 @@ def create_app(
         return f"/{session_token}/{path.lstrip('/')}"
 
     def render(name: str, request: Request, status_code: int = 200, **context) -> HTMLResponse:
-        context.update(request=request, token=session_token, url=url)
+        context.update(request=request, token=session_token, url=url, update_available=update_checker.available)
         return HTMLResponse(templates.get_template(name).render(**context), status_code=status_code)
 
     @app.get(f"/{session_token}/", response_class=HTMLResponse)
@@ -149,6 +153,7 @@ def create_app(
             project = project_store.get(project_id)
             settings = project_store.get_settings(project_id)
             inputs = project_store.list_inputs(project_id)
+            code_files = project_store.list_code_files(project_id)
             paths = project_store.paths(project_id)
         except ProjectNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -164,6 +169,7 @@ def create_app(
             project=project,
             settings=settings,
             inputs=inputs,
+            code_files=code_files,
             items=summary["items"][start : start + per_page],
             item_page=item_page,
             item_pages=max(1, math.ceil(len(summary["items"]) / per_page)),
@@ -176,6 +182,46 @@ def create_app(
             max_file_mb=MAX_FILE_BYTES // (1024 * 1024),
             credential_loaded=config_store.get_credential_state().session_loaded,
             model=config_store.get_default_model(DEFAULT_MODEL),
+            can_run_preregistration=(paths.state / "study-map.json").is_file(),
+            can_run_code_audit=(paths.state / DEVIATION_RUN_FILENAME).is_file() and bool(code_files),
+        )
+
+    @app.get(f"/{session_token}/projects/{{project_id}}/results", response_class=HTMLResponse)
+    async def project_results_page(request: Request, project_id: str, check: str = "", item_page: int = 1):
+        try:
+            project = project_store.get(project_id)
+            paths = project_store.paths(project_id)
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        summary = _load_project_summary(paths)
+        checks = ("inventory", "preregistration", "code-audit")
+        # Result navigation reflects persisted check artifacts directly. The overview
+        # summary is deliberately best-effort and can omit a report whose optional
+        # presentation file is missing.
+        available_checks = {
+            kind for kind, path in {
+                "inventory": paths.state / "inventory.json",
+                "preregistration": paths.state / DEVIATION_RUN_FILENAME,
+                "code-audit": paths.state / "code-audit.json",
+            }.items() if path.is_file()
+        }
+        if check not in checks:
+            check = next((name for name in ("preregistration", "inventory", "code-audit") if name in available_checks), "inventory")
+        selected_report = _load_browser_report(paths, check) if check in available_checks else None
+        per_page = 25
+        item_page = max(1, item_page)
+        start = (item_page - 1) * per_page
+        return render(
+            "results.html",
+            request,
+            project=project,
+            summary=summary,
+            items=summary["items"][start : start + per_page],
+            item_page=item_page,
+            item_pages=max(1, math.ceil(len(summary["items"]) / per_page)),
+            selected_check=check,
+            selected_report=selected_report,
+            available_checks=available_checks,
         )
 
     @app.get(f"/{session_token}/projects/{{project_id}}/reports/{{kind}}", response_class=HTMLResponse)
@@ -240,6 +286,34 @@ def create_app(
         except (ProjectError, JobConflictError) as exc:
             return RedirectResponse(url(f"projects/{project_id}?error={_query_value(str(exc))}"), status_code=303)
         return RedirectResponse(url(f"projects/{project_id}?notice=Input+removed."), status_code=303)
+
+    @app.post(f"/{session_token}/projects/{{project_id}}/code")
+    async def upload_code(request: Request, project_id: str):
+        records = []
+        try:
+            if job_manager.active_for_project(project_id): raise JobConflictError("Code cannot change while a run is active.")
+            form = await request.form(max_files=100, max_fields=220, max_part_size=MAX_FILE_BYTES)
+            uploads = [value for _, value in form.multi_items() if isinstance(value, UploadFile)]
+            relative_paths = form.getlist("paths")
+            if not uploads or len(relative_paths) != len(uploads): raise ProjectError("Choose code files with safe relative paths.")
+            if sum(upload.size or 0 for upload in uploads) > MAX_REQUEST_BYTES: raise UploadTooLargeError("Code upload exceeds the request limit.")
+            for upload, relative in zip(uploads, relative_paths): records.append(project_store.add_code_stream(project_id, str(relative), upload.file))
+        except (ProjectError, JobConflictError, UploadTooLargeError) as exc:
+            for record in records:
+                try: project_store.remove_code_file(project_id, record.path)
+                except ProjectError: pass
+            return RedirectResponse(url(f"projects/{project_id}?error={_query_value(str(exc))}"), status_code=303)
+        return RedirectResponse(url(f"projects/{project_id}?notice={_query_value(f'Added {len(records)} code file(s).')}"), status_code=303)
+
+    @app.post(f"/{session_token}/projects/{{project_id}}/code/delete")
+    async def delete_code(request: Request, project_id: str):
+        form = await request.form(max_fields=10)
+        try:
+            if job_manager.active_for_project(project_id): raise JobConflictError("Code cannot change while a run is active.")
+            project_store.remove_code_file(project_id, str(form.get("path", "")))
+        except (ProjectError, JobConflictError) as exc:
+            return RedirectResponse(url(f"projects/{project_id}?error={_query_value(str(exc))}"), status_code=303)
+        return RedirectResponse(url(f"projects/{project_id}?notice=Code+file+removed."), status_code=303)
 
     @app.get(f"/{session_token}/projects/{{project_id}}/settings", response_class=HTMLResponse)
     async def project_settings_page(request: Request, project_id: str, notice: str = "", error: str = ""):
@@ -348,23 +422,6 @@ def create_app(
             return RedirectResponse(url(f"settings?error={_query_value(str(exc))}"), status_code=303)
         return RedirectResponse(url(f"settings?notice={_query_value(notice)}"), status_code=303)
 
-    @app.post(f"/{session_token}/credentials/load")
-    async def load_credentials():
-        try:
-            config_store.load_api_key_from_keychain()
-        except CredentialStoreError as exc:
-            return RedirectResponse(url(f"settings?error={_query_value(str(exc))}"), status_code=303)
-        notice = f"API key loaded from {system_credential_store_name()} for this Watson session."
-        return RedirectResponse(url(f"settings?notice={_query_value(notice)}"), status_code=303)
-
-    @app.post(f"/{session_token}/credentials/forget")
-    async def forget_credentials():
-        config_store.forget_session_api_key()
-        return RedirectResponse(
-            url("settings?notice=API+key+removed+from+this+Watson+session."),
-            status_code=303,
-        )
-
     @app.post(f"/{session_token}/credentials/migrate")
     async def migrate_credentials():
         try:
@@ -400,14 +457,36 @@ def create_app(
             inputs = project_store.list_inputs(project_id)
             if not inputs:
                 raise ProjectError("Add at least one input file before processing.")
-            api_key = config_store.get_session_api_key()
-            if not api_key:
-                raise ProjectError(
-                    "Explicitly load the Gemini API key from the system credential store in Settings before processing."
-                )
             saved = project_store.get_settings(project_id)
-            action = str(form.get("action", "all"))
-            retry_mode = str(form.get("retry_mode", "failed"))
+            requested_action = str(form.get("action", "all"))
+            code_audit_requested = requested_action in {
+                "all_with_code",
+                "deviation_with_code",
+                "code_audit",
+            }
+            action = {
+                "all_with_code": "all",
+                "deviation_with_code": "deviation",
+            }.get(requested_action, requested_action)
+            paths = project_store.paths(project_id)
+            if (
+                action == "deviation"
+                and not (paths.state / "study-map.json").is_file()
+            ):
+                raise ProjectError(
+                    "Run inventory before selecting a preregistration check."
+                )
+            if (
+                action == "code_audit"
+                and not (paths.state / DEVIATION_RUN_FILENAME).is_file()
+            ):
+                raise ProjectError(
+                    "Run the preregistration check before selecting code audit only."
+                )
+            if code_audit_requested and not project_store.list_code_files(project_id):
+                raise ProjectError("Add at least one code file before selecting a run that includes code audit.")
+            api_key = config_store.get_api_key_for_run()
+            retry_mode = "all" if form.get("overwrite_completed") is not None else "failed"
             settings = RunnerSettings(
                 action=action,
                 model=config_store.get_default_model(DEFAULT_MODEL),
@@ -415,11 +494,12 @@ def create_app(
                 api_key=api_key,
                 retry_mode=retry_mode,
                 file_context=saved.file_context,
+                code_audit_enabled=code_audit_requested,
             )
             job = job_manager.start(project_id, settings)
-        except (ProjectError, JobConflictError, ValidationError) as exc:
+        except (CredentialStoreError, ProjectError, JobConflictError, ValidationError) as exc:
             return RedirectResponse(url(f"projects/{project_id}?error={_query_value(_validation_message(exc))}"), status_code=303)
-        return RedirectResponse(url(f"projects/{project_id}?notice=Run+started.&job={job.id}"), status_code=303)
+        return RedirectResponse(url(f"projects/{project_id}?job={job.id}"), status_code=303)
 
     @app.post(f"/{session_token}/projects/{{project_id}}/runs/{{job_id}}/cancel")
     async def cancel_run(project_id: str, job_id: str):
@@ -467,10 +547,12 @@ def create_app(
         allowed = {
             "watson-inventory-report.md": paths.outputs / "watson-inventory-report.md",
             "watson-prereg-adherence-report.md": paths.outputs / "watson-prereg-adherence-report.md",
+            "watson-code-audit-report.md": paths.outputs / "watson-code-audit-report.md",
             "reproducibility.json": paths.outputs / "reproducibility.json",
             "inventory.json": paths.state / "inventory.json",
             "study-map.json": paths.state / "study-map.json",
             DEVIATION_RUN_FILENAME: paths.state / DEVIATION_RUN_FILENAME,
+            "code-audit.json": paths.state / "code-audit.json",
         }
         target = allowed.get(filename)
         if target is None or not target.is_file():
@@ -634,6 +716,7 @@ def _load_project_summary(paths) -> dict:
             pass
     deviation_path = paths.state / DEVIATION_RUN_FILENAME
     if deviation_path.exists():
+        result["has_result"] = True
         try:
             run = json.loads(deviation_path.read_text(encoding="utf-8"))
             reports = run.get("reports", [])
@@ -665,6 +748,10 @@ def _load_project_summary(paths) -> dict:
             result["usage"] = reproducibility.get("resource_usage", {})
         except (OSError, json.JSONDecodeError):
             pass
+    if (paths.state / "code-audit.json").exists():
+        result["has_result"] = True
+        result["downloads"].extend(["code-audit.json", "watson-code-audit-report.md"])
+        result["reports"].append({"kind": "code-audit", "label": "Read code audit"})
     result["warnings"] = list(dict.fromkeys(result["warnings"]))
     result["downloads"] = [name for name in dict.fromkeys(result["downloads"]) if (paths.outputs / name).exists() or (paths.state / name).exists()]
     return result
@@ -774,9 +861,7 @@ def _deviation_study_item(report: dict, index: int) -> dict:
                 "category": finding.get("category", "uncategorised"),
                 "preregistered_plan": finding.get("preregistered_plan", ""),
                 "underspecification": finding.get("underspecification", ""),
-                "plausible_alternatives": finding.get("plausible_alternatives", ""),
                 "article_choice": finding.get("article_choice", ""),
-                "potential_impact": finding.get("potential_impact", ""),
                 "evidence": finding.get("evidence", ""),
                 "severity": finding.get("severity", ""),
             }
@@ -852,6 +937,18 @@ def _load_browser_report(paths, kind: str) -> dict | None:
             "skipped_studies": run.get("skipped_studies", []),
             "download": "watson-prereg-adherence-report.md",
         }
+    if kind == "code-audit":
+        path = paths.state / "code-audit.json"
+        if not path.is_file(): return None
+        try: audits = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError): return None
+        for audit in audits:
+            if audit.get("status") == "failed":
+                audit["failure_message"] = code_audit_failure_message(
+                    str(audit.get("error", ""))
+                )
+        analysis_count = sum(len(audit.get("findings", [])) for audit in audits)
+        return {"kind": "code-audit", "title": "Code audit", "generated_at": "", "model": "", "summary": f"Source-only audit of {analysis_count} analyses reported in the article or supplemental materials, each checked against the manuscript and preregistration; code was never executed.", "warnings": [], "studies": [], "skipped_studies": [], "download": "watson-code-audit-report.md", "audits": audits}
     return None
 
 

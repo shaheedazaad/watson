@@ -86,7 +86,7 @@ def test_explicit_save_uses_keychain_and_keeps_secret_off_disk(
         assert store.config_path.stat().st_mode & 0o077 == 0
 
 
-def test_saved_key_requires_explicit_load_in_a_new_session(
+def test_saved_key_is_read_only_when_a_run_requests_it(
     tmp_path: Path,
     credential_backend: FakeCredentialBackend,
 ) -> None:
@@ -99,7 +99,7 @@ def test_saved_key_requires_explicit_load_in_a_new_session(
     assert store.get_credential_state().has_saved_key
     assert credential_backend.calls == []
 
-    assert store.load_api_key_from_keychain() == "load-me"
+    assert store.get_api_key_for_run() == "load-me"
     assert [call[0] for call in credential_backend.calls] == ["get"]
     assert store.get_session_api_key() == "load-me"
 

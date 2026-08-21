@@ -9,7 +9,7 @@ from pathlib import Path
 
 import typer
 
-from watson.config import ConfigStore, CredentialStoreError, system_credential_store_name
+from watson.config import ConfigStore, CredentialStoreError
 from watson.deviation_guide import (
     DEFAULT_DEVIATION_GUIDE_PATH,
     DeviationGuideError,
@@ -49,14 +49,9 @@ def web() -> None:
 @app.command("run")
 def run_headless(
     project_id: str = typer.Argument(..., help="Opaque ID shown by `watson projects list`."),
-    action: str = typer.Option("all", "--action", help="inventory, deviation, or all."),
+    action: str = typer.Option("all", "--action", help="inventory, deviation, code_audit, or all."),
     retry_all: bool = typer.Option(False, "--retry-all", help="Rerun completed work too."),
     api_key_env: str = typer.Option("GEMINI_API_KEY", "--api-key-env", help="Environment variable containing the API key."),
-    use_keychain: bool = typer.Option(
-        False,
-        "--use-keychain",
-        help="Explicitly load the saved API key from the operating-system credential store.",
-    ),
     data_dir: Path | None = typer.Option(None, "--data-dir", help="Override Watson's application-data directory."),
 ) -> None:
     """Run the same processing pipeline noninteractively for a managed project."""
@@ -65,16 +60,11 @@ def run_headless(
     saved = store.get_settings(project_id)
     config = ConfigStore(store.data_dir)
     api_key = os.environ.get(api_key_env)
-    if not api_key and use_keychain:
+    if not api_key:
         try:
-            api_key = config.load_api_key_from_keychain()
+            api_key = config.get_api_key_for_run()
         except CredentialStoreError as exc:
             raise typer.BadParameter(str(exc)) from exc
-    if not api_key:
-        raise typer.BadParameter(
-            f"No API key found in {api_key_env}. Pass --use-keychain to explicitly read "
-            f"{system_credential_store_name()}."
-        )
     settings = RunnerSettings(
         action=action,
         model=config.get_default_model(DEFAULT_MODEL),

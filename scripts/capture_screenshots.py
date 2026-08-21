@@ -23,14 +23,17 @@ import uvicorn
 from playwright.sync_api import sync_playwright
 
 from watson.schemas import (
+    CodeAuditAnalysis,
+    CodeAuditCheck,
+    CodeAuditFinding,
+    CodeAuditResult,
+    CodeCitation,
     DegreeOfFreedomFinding,
-    DegreesOfFreedomResult,
     DeviationCheckRun,
     DeviationFinding,
     DocumentClassification,
     DocumentType,
     FileRecord,
-    InventoryDiff,
     InventoryResult,
     MissingPreregisteredItem,
     PreregistrationMatch,
@@ -52,6 +55,7 @@ NOW = datetime(2026, 3, 4, 15, 30, tzinfo=timezone.utc)
 ARTICLE = "smith-2026-memory-article.pdf"
 PREREG = "smith-2026-preregistration.pdf"
 SUPPLEMENT = "smith-2026-supplemental-analyses.pdf"
+CODE = "analysis.R"
 
 
 def build_inventory() -> InventoryResult:
@@ -231,9 +235,7 @@ def build_deviation_run() -> DeviationCheckRun:
                 category="exclusion",
                 preregistered_plan="Exclude participants with 'poor task engagement'.",
                 underspecification="No operational definition of engagement was given.",
-                plausible_alternatives="Accuracy floor, RT-based, or experimenter judgment could each apply.",
                 article_choice="Experimenter judgment, applied post hoc.",
-                potential_impact="Exclusion criteria chosen after seeing the data could inflate the effect.",
                 evidence="Preregistration, Section 4.",
                 severity="high",
             )
@@ -263,17 +265,64 @@ def build_deviation_run() -> DeviationCheckRun:
     )
 
 
+def build_code_audits() -> list[CodeAuditResult]:
+    citation = CodeCitation(
+        path=CODE,
+        start_line=2,
+        end_line=2,
+        quote="model <- lm(recall_accuracy ~ condition + age, data = trials)",
+    )
+    return [
+        CodeAuditResult(
+            study_id="study-1",
+            study_label="Study 1",
+            findings=[
+                CodeAuditFinding(
+                    analysis=CodeAuditAnalysis(
+                        analysis_id="C1",
+                        article_item_ids=["A3"],
+                        reported_analysis="Primary recall-accuracy model",
+                        article_evidence="Results, Table 2",
+                    ),
+                    manuscript_check=CodeAuditCheck(
+                        status="matches",
+                        rationale="The model outcome, condition effect, and age covariate match the analysis reported in the manuscript.",
+                        citations=[citation],
+                    ),
+                    preregistration_check=CodeAuditCheck(
+                        status="deviates",
+                        rationale="The preregistration did not include age as a covariate in the primary analysis.",
+                        citations=[citation.model_copy(deep=True)],
+                    ),
+                )
+            ],
+            access_log=[citation],
+        )
+    ]
+
+
 def seed_project(app) -> str:
     store = app.state.project_store
     project = store.create("Working Memory Replication (Demo)")
     store.add_stream(project.id, ARTICLE, io.BytesIO(b"%PDF-1.4 demo article content\n" + b"0" * 800_000))
     store.add_stream(project.id, PREREG, io.BytesIO(b"%PDF-1.4 demo preregistration content\n" + b"0" * 140_000))
     store.add_stream(project.id, SUPPLEMENT, io.BytesIO(b"%PDF-1.4 demo supplemental content\n" + b"0" * 90_000))
+    store.add_code_stream(
+        project.id,
+        CODE,
+        io.BytesIO(
+            b"# Primary analysis\nmodel <- lm(recall_accuracy ~ condition + age, data = trials)\nsummary(model)\n"
+        ),
+    )
 
     paths = store.paths(project.id)
     (paths.state / "inventory.json").write_text(build_inventory().model_dump_json(), encoding="utf-8")
     (paths.state / "study-map.json").write_text(build_study_map().model_dump_json(), encoding="utf-8")
     (paths.state / "deviation-checks.json").write_text(build_deviation_run().model_dump_json(), encoding="utf-8")
+    (paths.state / "code-audit.json").write_text(
+        "[\n" + ",\n".join(audit.model_dump_json() for audit in build_code_audits()) + "\n]",
+        encoding="utf-8",
+    )
 
     empty = store.create("New Project (Demo)")
     return project.id
@@ -314,6 +363,9 @@ def capture(project_id: str) -> None:
 
         page.goto(f"{BASE}/projects/{project_id}/results")
         page.screenshot(path=OUT_DIR / "results.png", full_page=True)
+
+        page.goto(f"{BASE}/projects/{project_id}/results?check=code-audit")
+        page.screenshot(path=OUT_DIR / "code-audit.png", full_page=True)
 
         page.goto(f"{BASE}/projects/{project_id}/reports/preregistration")
         page.screenshot(path=OUT_DIR / "report-preregistration.png", full_page=True)

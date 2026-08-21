@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "watson-research-cli"
-version = "0.2.2"
+version = "0.2.3"
 description = "Private localhost app for inventorying psychology articles and checking preregistration adherence."
 readme = "README.md"
 requires-python = ">=3.11"

@@ -124,6 +124,17 @@ class ConfigStore:
         """Read only the process-memory copy; never access the Keychain."""
         return _SESSION_SECRETS.get(self._session_key())
 
+    def get_api_key_for_run(self) -> str:
+        """Return the session key or read the saved key when a run explicitly starts."""
+        api_key = self.get_session_api_key()
+        if api_key:
+            return api_key
+        if not self.get_credential_state().has_saved_key:
+            raise CredentialStoreError(
+                f"Save a Gemini API key in Settings before running Watson."
+            )
+        return self.load_api_key_from_keychain()
+
     def save_api_key_to_keychain(self, api_key: str) -> None:
         """Persist a key after an explicit user save action and cache it for this run."""
         api_key = api_key.strip()

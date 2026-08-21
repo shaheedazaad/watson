@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -23,6 +23,63 @@ class FileRecord(BaseModel):
     size_bytes: int
     modified_at: datetime
     sha256: str
+
+class CodeFileRecord(BaseModel):
+    """Metadata only; source text is never persisted in this manifest."""
+    path: str
+    extension: str
+    size_bytes: int
+    sha256: str
+
+class CodeCitation(BaseModel):
+    path: str
+    start_line: int = Field(ge=1)
+    end_line: int = Field(ge=1)
+    quote: str = ""
+
+
+class CodeAuditAnalysis(BaseModel):
+    """One analysis reported in the article or its supplemental materials."""
+
+    analysis_id: str = ""
+    article_item_ids: list[str] = Field(default_factory=list)
+    reported_analysis: str = ""
+    article_evidence: str = ""
+
+
+class CodeAuditCheck(BaseModel):
+    """A source-backed comparison of code with one documentary account."""
+
+    status: Literal["matches", "deviates", "unclear"] = Field(
+        default="unclear",
+        description="One of matches, deviates, or unclear.",
+    )
+    rationale: str = ""
+    citations: list[CodeCitation] = Field(default_factory=list)
+    note: str = ""
+
+
+class CodeAuditFinding(BaseModel):
+    """The two required code checks for one reported analysis."""
+
+    analysis: CodeAuditAnalysis = Field(default_factory=CodeAuditAnalysis)
+    manuscript_check: CodeAuditCheck = Field(default_factory=CodeAuditCheck)
+    preregistration_check: CodeAuditCheck = Field(default_factory=CodeAuditCheck)
+
+class CodeAuditUsage(BaseModel):
+    requests: int = 3
+    files_read: int = 0
+    lines_read: int = 0
+    excerpt_characters: int = 0
+
+class CodeAuditResult(BaseModel):
+    study_id: str
+    study_label: str
+    status: str = "completed"
+    findings: list[CodeAuditFinding] = Field(default_factory=list)
+    access_log: list[CodeCitation] = Field(default_factory=list)
+    resource_usage: CodeAuditUsage = Field(default_factory=CodeAuditUsage)
+    error: str = ""
 
 
 class EvidenceHint(BaseModel):
@@ -222,15 +279,13 @@ class InventoryDiff(BaseModel):
 
 
 class DegreeOfFreedomFinding(BaseModel):
-    """A preregistered commitment left open enough to allow more than one defensible result."""
+    """A preregistered commitment that leaves a material decision open."""
 
     prereg_item_id: str = ""
     category: str = ""
     preregistered_plan: str = ""
     underspecification: str = ""
-    plausible_alternatives: str = ""
     article_choice: str = ""
-    potential_impact: str = ""
     evidence: str = ""
     severity: str = ""
 

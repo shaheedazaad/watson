@@ -1,0 +1,11 @@
+<dl class="result-summary" aria-label="Result summary">
+  <div><dt>Documents</dt><dd>{{ summary.files }}</dd></div>
+  <div><dt>Studies found</dt><dd>{{ summary.studies }}</dd></div>
+  <div><dt>Ready to check</dt><dd>{{ summary.ready }}</dd></div>
+  <div><dt>Studies checked</dt><dd>{{ summary.checked }}</dd></div>
+  <div><dt>Preregistered, not reported</dt><dd>{{ summary.missing }}</dd></div>
+  <div><dt>Reported, not preregistered</dt><dd>{{ summary.unregistered }}</dd></div>
+  <div><dt>Deviations</dt><dd>{{ summary.deviations }}</dd></div>
+  <div><dt>Degrees of freedom</dt><dd>{{ summary.degrees_of_freedom }}</dd></div>
+  <div class="{% if summary.failed %}danger-number{% endif %}"><dt>Failed</dt><dd>{{ summary.failed }}</dd></div>
+</dl>

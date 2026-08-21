@@ -2,8 +2,10 @@
   setupThemeToggle();
   setupConfirmForms();
   setupDropzone();
+  setupCodeDropzone();
   setupJobEvents();
   setupStudyLinks();
+  setupProjectRows();
 
   function setupConfirmForms() {
     document.querySelectorAll("form[data-confirm]").forEach((form) => {
@@ -34,7 +36,7 @@
     if (!input || !picker || !submit || !selection) return;
 
     picker.addEventListener("click", () => input.click());
-    input.addEventListener("change", updateSelection);
+    input.addEventListener("change", () => updateSelection(true));
 
     for (const eventName of ["dragenter", "dragover"]) {
       form.addEventListener(eventName, (event) => {
@@ -55,7 +57,7 @@
         selection.textContent = "This browser cannot attach dropped files. Use Add files instead.";
         return;
       }
-      updateSelection();
+      updateSelection(true);
     });
     form.addEventListener("submit", (event) => {
       if (!input.files?.length) {
@@ -68,7 +70,7 @@
       selection.textContent = `Uploading ${input.files.length} file${input.files.length === 1 ? "" : "s"}…`;
     });
 
-    function updateSelection() {
+    function updateSelection(upload = false) {
       const files = Array.from(input.files || []);
       submit.disabled = files.length === 0;
       if (!files.length) {
@@ -78,6 +80,37 @@
       const names = files.slice(0, 3).map((file) => file.name).join(", ");
       const remainder = files.length > 3 ? ` and ${files.length - 3} more` : "";
       selection.textContent = `${files.length} file${files.length === 1 ? "" : "s"}: ${names}${remainder}`;
+      if (upload) form.requestSubmit();
+    }
+  }
+
+  function setupCodeDropzone() {
+    const form = document.querySelector("[data-code-dropzone]");
+    if (!form) return;
+    const input = form.querySelector("#code-input"), folder = form.querySelector("#code-folder-input"), picker = form.querySelector("[data-code-picker]"), folderPicker = form.querySelector("[data-code-folder-picker]"), submit = form.querySelector("[data-code-submit]"), selection = form.querySelector("[data-code-selection]"), preview = form.querySelector("[data-code-preview]");
+    let files = [];
+    picker.addEventListener("click", () => input.click());
+    input.addEventListener("change", () => setFiles(Array.from(input.files), true));
+    folderPicker.addEventListener("click", () => folder.click());
+    folder.addEventListener("change", () => setFiles(Array.from(folder.files), true));
+    ["dragenter", "dragover"].forEach(name => form.addEventListener(name, event => { event.preventDefault(); }));
+    form.addEventListener("drop", event => { event.preventDefault(); setFiles(Array.from(event.dataTransfer.files), true); });
+    form.addEventListener("submit", event => {
+      if (!files.length) { event.preventDefault(); return; }
+      event.preventDefault(); const data = new FormData();
+      files.forEach(file => { data.append("files", file); data.append("paths", file.webkitRelativePath || file.name); });
+      submit.disabled = true; selection.textContent = `Uploading ${files.length} code file${files.length === 1 ? "" : "s"}…`;
+      fetch(form.action, { method: "POST", body: data, redirect: "follow" })
+        .then(response => { if (!response.ok) throw new Error("Upload failed."); window.location.assign(response.url); })
+        .catch(() => { submit.disabled = false; selection.textContent = "Upload failed. Try again or check the file type and size."; });
+    });
+    function setFiles(next, upload) {
+      files = next; submit.disabled = !files.length;
+      const paths = files.map(file => file.webkitRelativePath || file.name);
+      selection.textContent = files.length ? `${files.length} code file${files.length === 1 ? "" : "s"} selected` : "No code selected";
+      preview.hidden = !files.length; preview.replaceChildren(...paths.slice(0, 12).map(path => { const item = document.createElement("li"); item.textContent = path; return item; }));
+      if (paths.length > 12) { const item = document.createElement("li"); item.textContent = `…and ${paths.length - 12} more`; preview.append(item); }
+      if (upload && files.length) form.requestSubmit();
     }
   }
 
@@ -106,5 +139,23 @@
       link.addEventListener("click", () => openStudy(link.hash));
     });
     openStudy(window.location.hash);
+  }
+
+  function setupProjectRows() {
+    document.querySelectorAll(".project-row[data-project-href]").forEach((row) => {
+      const openProject = () => {
+        window.location.href = row.dataset.projectHref;
+      };
+
+      row.addEventListener("click", (event) => {
+        if (event.target.closest("a, button, input, select, textarea")) return;
+        openProject();
+      });
+      row.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        openProject();
+      });
+    });
   }
 })();

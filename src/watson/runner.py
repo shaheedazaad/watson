@@ -15,12 +15,13 @@ from watson.config import DEFAULT_THINKING_LEVEL, THINKING_LEVEL_OPTIONS
 from watson.deviation_check import (
     DEVIATION_REPORT_FILENAME,
     DEVIATION_RUN_FILENAME,
+    load_deviation_run,
     load_study_map,
     ready_studies,
     run_deviation_checks,
     save_deviation_markdown,
 )
-from watson.deviation_guide import load_deviation_guide
+from watson.deviation_guide import DeviationGuide, load_deviation_guide
 from watson.file_context import save_file_context
 from watson.gemini_client import DEFAULT_MODEL, GeminiResearchClient
 from watson.inventory import (
@@ -35,7 +36,8 @@ from watson.projects import ProjectPaths
 from watson.report import write_inventory_report
 from watson.resources import default_deviation_guide
 from watson.scanner import scan_files
-from watson.schemas import InventoryResult
+from watson.schemas import CodeAuditResult, DeviationCheckRun, InventoryResult, StudyMap
+from watson.code_audit import render as render_code_audit
 
 
 class ProgressAdapter(Protocol):
@@ -71,12 +73,13 @@ class EventCancellationSignal:
 class RunnerSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    action: Literal["inventory", "deviation", "all"] = "all"
+    action: Literal["inventory", "deviation", "code_audit", "all"] = "all"
     model: str = DEFAULT_MODEL
     thinking_level: str = DEFAULT_THINKING_LEVEL
     api_key: SecretStr = Field(exclude=True)
     retry_mode: Literal["failed", "all"] = "failed"
     file_context: str = ""
+    code_audit_enabled: bool = False
     random_seed: int | None = None
     concurrency: int = Field(default=1, ge=1, le=16)
 
@@ -180,6 +183,10 @@ def run_project(
                 warnings=len(inventory.review_notes),
             )
 
+        deviation_run: DeviationCheckRun | None = None
+        study_map: StudyMap | None = None
+        guide = None
+
         _raise_if_cancelled(cancellation)
         if settings.action in {"deviation", "all"}:
             study_map_path = paths.state / "study-map.json"
@@ -208,7 +215,6 @@ def run_project(
                     cancelled=cancellation.is_cancelled,
                 )
             save_upload_cache(upload_cache_path, client.upload_cache)
-            _release_context_caches(client)
             deviation_report_path = paths.outputs / DEVIATION_REPORT_FILENAME
             save_deviation_markdown(deviation_report_path, deviation_run)
             result.deviation_path = str(paths.state / DEVIATION_RUN_FILENAME)
@@ -219,6 +225,55 @@ def run_project(
                 skipped=len(deviation_run.skipped_studies),
             )
             progress.emit("deviation", "Preregistration checks complete")
+
+        if settings.action == "code_audit":
+            if not inventory_current:
+                raise ValueError(
+                    "Inputs changed after the inventory. Run inventory and preregistration checks before code audit."
+                )
+            study_map_path = paths.state / "study-map.json"
+            deviation_run_path = paths.state / DEVIATION_RUN_FILENAME
+            if not study_map_path.is_file() or not deviation_run_path.is_file():
+                raise ValueError(
+                    "Code audit requires completed inventory and preregistration checks."
+                )
+            study_map = load_study_map(study_map_path)
+            deviation_run = load_deviation_run(deviation_run_path)
+            with default_deviation_guide() as guide_path:
+                guide = load_deviation_guide(guide_path)
+
+        should_run_code_audit = settings.action == "code_audit" or (
+            settings.code_audit_enabled and settings.action in {"deviation", "all"}
+        )
+        if should_run_code_audit:
+            if study_map is None or deviation_run is None or guide is None:
+                raise ValueError(
+                    "Code audit requires completed paper and preregistration inventories."
+                )
+            code_audit_path = paths.state / "code-audit.json"
+            existing_audits = (
+                _load_code_audits(code_audit_path)
+                if settings.retry_mode == "failed"
+                else {}
+            )
+            audit_results = _run_code_audits(
+                paths,
+                study_map,
+                deviation_run,
+                guide,
+                client,
+                cancellation,
+                progress,
+                existing_audits,
+                force=settings.retry_mode == "all",
+            )
+            code_audit_path.write_text(json.dumps([item.model_dump(mode="json") for item in audit_results], indent=2) + "\n", encoding="utf-8")
+            (paths.outputs / "watson-code-audit-report.md").write_text(render_code_audit(audit_results), encoding="utf-8")
+            save_upload_cache(upload_cache_path, client.upload_cache)
+            result.summary["code_audits"] = len(audit_results)
+
+        if settings.action in {"deviation", "code_audit", "all"}:
+            _release_context_caches(client)
     except InterruptedError as exc:
         progress.emit("cancelled", "Processing cancelled")
         raise ProcessingCancelled(str(exc)) from exc
@@ -234,6 +289,72 @@ def run_project(
     _write_reproducibility(paths, settings, safe_usage)
     progress.emit("complete", "Run complete")
     return result
+
+
+def _run_code_audits(
+    paths: ProjectPaths,
+    study_map: StudyMap,
+    deviation_run: DeviationCheckRun,
+    guide: DeviationGuide,
+    client: object,
+    cancellation: CancellationSignal,
+    progress: ProgressAdapter,
+    existing_audits: dict[str, CodeAuditResult] | None = None,
+    *,
+    force: bool = False,
+) -> list[CodeAuditResult]:
+    """Audit only the reported-analysis inventories from a completed reg check."""
+    results: list[CodeAuditResult] = []
+    existing_audits = existing_audits or {}
+    deviation_reports = {
+        report.study_id: report for report in deviation_run.reports
+    }
+    for study in ready_studies(study_map):
+        _raise_if_cancelled(cancellation)
+        existing = existing_audits.get(study.study_id)
+        if (
+            not force
+            and existing is not None
+            and existing.status in {"complete", "completed"}
+        ):
+            progress.emit("code_audit", f"Skipping {study.label} - existing result")
+            results.append(existing)
+            continue
+        try:
+            progress.emit("code_audit", f"Auditing code for {study.label}")
+            deviation_report = deviation_reports.get(study.study_id)
+            if deviation_report is None:
+                raise ValueError(
+                    "Code audit requires a completed preregistration check for this study."
+                )
+            audit = getattr(client, "audit_code")(
+                paths.inputs,
+                paths.code,
+                study,
+                guide,
+                deviation_report.preregistration_inventory,
+                deviation_report.article_inventory,
+            )
+        except Exception as exc:
+            audit = CodeAuditResult(
+                study_id=study.study_id,
+                study_label=study.label,
+                status="failed",
+                error=str(exc),
+            )
+        results.append(audit)
+    return results
+
+
+def _load_code_audits(path: Path) -> dict[str, CodeAuditResult]:
+    if not path.is_file():
+        return {}
+    try:
+        values = json.loads(path.read_text(encoding="utf-8"))
+        audits = [CodeAuditResult.model_validate(value) for value in values]
+    except (OSError, ValueError, TypeError):
+        return {}
+    return {audit.study_id: audit for audit in audits}
 
 
 def _release_context_caches(client: object) -> None:
@@ -296,6 +417,16 @@ def _clear_deviation_results(paths: ProjectPaths) -> None:
     for path in (
         paths.state / DEVIATION_RUN_FILENAME,
         paths.outputs / DEVIATION_REPORT_FILENAME,
+    ):
+        if path.exists():
+            path.unlink()
+    _clear_code_audit_results(paths)
+
+
+def _clear_code_audit_results(paths: ProjectPaths) -> None:
+    for path in (
+        paths.state / "code-audit.json",
+        paths.outputs / "watson-code-audit-report.md",
     ):
         if path.exists():
             path.unlink()

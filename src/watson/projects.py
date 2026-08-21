@@ -7,6 +7,7 @@ import shutil
 import sys
 import unicodedata
 import uuid
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import BinaryIO
@@ -14,6 +15,7 @@ from typing import BinaryIO
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from watson.file_support import supported_extensions
+from watson.schemas import CodeFileRecord
 
 
 PROJECTS_DIRNAME = "projects"
@@ -23,6 +25,7 @@ MAX_FILE_BYTES = 50 * 1024 * 1024
 MAX_REQUEST_BYTES = 200 * 1024 * 1024
 MAX_PROJECT_NAME_LENGTH = 100
 MAX_FILENAME_LENGTH = 180
+CODE_EXTENSIONS = {".py", ".r", ".rmd", ".js", ".ts", ".sh", ".bash", ".sql", ".stan", ".do", ".m", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".json", ".txt", ".md"}
 
 
 def utc_now() -> datetime:
@@ -86,12 +89,13 @@ class ProjectPaths:
         self.metadata = self.root / PROJECT_METADATA_FILENAME
         self.settings = self.root / PROJECT_SETTINGS_FILENAME
         self.inputs = self.root / "inputs"
+        self.code = self.root / "code"
         self.state = self.root / "state"
         self.outputs = self.root / "outputs"
         self.jobs = self.root / "jobs"
 
     def ensure(self) -> None:
-        for path in (self.root, self.inputs, self.state, self.outputs, self.jobs):
+        for path in (self.root, self.inputs, self.code, self.state, self.outputs, self.jobs):
             path.mkdir(parents=True, exist_ok=True)
 
 
@@ -219,6 +223,7 @@ class ProjectStore:
         finally:
             if temporary.exists():
                 temporary.unlink()
+        self.invalidate_code_audit(project_id, touch=False)
         self.touch(project_id)
         stat = destination.stat()
         return InputRecord(
@@ -233,6 +238,48 @@ class ProjectStore:
             raise ProjectError(f"Not a file: {source}")
         with source.open("rb") as stream:
             return self.add_stream(project_id, source.name, stream)
+
+    def add_code_stream(self, project_id: str, relative_path: str, stream: BinaryIO) -> CodeFileRecord:
+        paths = self.paths(project_id)
+        relative = validate_code_relative_path(relative_path)
+        destination = paths.code / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            raise ProjectError(f"A code file already exists at {relative}.")
+        temporary = destination.parent / f".{uuid.uuid4().hex}.upload"
+        total = 0; digest = hashlib.sha256(); first = b""
+        try:
+            with temporary.open("xb") as output:
+                while chunk := stream.read(1024 * 1024):
+                    if not first: first = chunk[:4096]
+                    total += len(chunk)
+                    if total > MAX_FILE_BYTES:
+                        raise UploadTooLargeError(f"{relative} exceeds the {MAX_FILE_BYTES // (1024 * 1024)} MB limit.")
+                    digest.update(chunk); output.write(chunk)
+            if b"\x00" in first:
+                raise ProjectError("Code audit accepts plaintext source and configuration files only.")
+            temporary.replace(destination)
+        finally:
+            if temporary.exists(): temporary.unlink()
+        self.invalidate_code_audit(project_id, touch=False)
+        self.touch(project_id)
+        return CodeFileRecord(path=relative, extension=destination.suffix.lower(), size_bytes=total, sha256=digest.hexdigest())
+
+    def list_code_files(self, project_id: str) -> list[CodeFileRecord]:
+        code = self.paths(project_id).code
+        records = []
+        for path in sorted(code.rglob("*"), key=lambda item: str(item).casefold()):
+            if path.is_file() and not path.name.startswith("."):
+                data = path.read_bytes()
+                records.append(CodeFileRecord(path=path.relative_to(code).as_posix(), extension=path.suffix.lower(), size_bytes=len(data), sha256=hashlib.sha256(data).hexdigest()))
+        return records
+
+    def remove_code_file(self, project_id: str, relative_path: str) -> None:
+        paths = self.paths(project_id); relative = validate_code_relative_path(relative_path)
+        target = paths.code / relative
+        if not target.is_file() or paths.code not in target.resolve().parents:
+            raise ProjectError("Code file not found.")
+        target.unlink(); self.invalidate_code_audit(project_id, touch=False); self.touch(project_id)
 
     def import_directory(self, project_id: str, source: Path) -> list[InputRecord]:
         source = source.expanduser().resolve()
@@ -287,6 +334,7 @@ class ProjectStore:
         if not target.is_file() or target.parent.resolve() != paths.inputs:
             raise ProjectError("Input not found.")
         target.unlink()
+        self.invalidate_code_audit(project_id, touch=False)
         self.touch(project_id)
 
     def invalidate_outputs(self, project_id: str) -> None:
@@ -304,6 +352,12 @@ class ProjectStore:
         if results_dir.exists():
             shutil.rmtree(results_dir)
         self.touch(project_id)
+
+    def invalidate_code_audit(self, project_id: str, *, touch: bool = True) -> None:
+        paths = self.paths(project_id)
+        for path in (paths.state / "code-audit.json", paths.outputs / "watson-code-audit-report.md"):
+            if path.exists(): path.unlink()
+        if touch: self.touch(project_id)
 
     def touch(self, project_id: str) -> None:
         paths = self.paths(project_id)
@@ -357,6 +411,20 @@ def sanitize_filename(filename: str) -> str:
     }:
         normalized = f"_{normalized}"
     return normalized
+
+def validate_code_relative_path(value: str) -> str:
+    value = unicodedata.normalize("NFC", value).replace("\\", "/")
+    path = Path(value)
+    if not value or path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        raise ProjectError("Unsafe code file path.")
+    if any(ord(char) < 32 for char in value) or len(value) > 1000:
+        raise ProjectError("Unsafe code file path.")
+    suffix = path.suffix.lower()
+    if suffix == ".csv":
+        raise ProjectError("CSV files are raw data and are not accepted for code audit. Add them as input documents if needed.")
+    if suffix not in CODE_EXTENSIONS:
+        raise ProjectError(f"Unsupported code file type: {path.suffix or '[no extension]'}.")
+    return path.as_posix()
 
 
 def unique_destination(directory: Path, filename: str) -> Path:

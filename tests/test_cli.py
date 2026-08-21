@@ -28,7 +28,7 @@ def test_resolve_guide_path_falls_back_to_repo_file(tmp_path: Path) -> None:
     assert resolved.name == "watson-deviation-guide.yaml"
 
 
-def test_headless_run_does_not_read_keychain_without_explicit_flag(
+def test_headless_run_requires_a_saved_key(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -43,10 +43,10 @@ def test_headless_run_does_not_read_keychain_without_explicit_flag(
     result = CliRunner().invoke(app, ["run", project.id, "--data-dir", str(tmp_path)])
 
     assert result.exit_code != 0
-    assert "--use-keychain" in unstyle(result.output)
+    assert "Save a Gemini API key" in unstyle(result.output)
 
 
-def test_headless_run_reads_keychain_with_explicit_flag(
+def test_headless_run_reads_keychain_when_the_run_starts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -65,10 +65,11 @@ def test_headless_run_reads_keychain_with_explicit_flag(
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(config_module, "_credential_backend", lambda: Backend())
     monkeypatch.setattr(cli_module, "run_project", lambda *args, **kwargs: Result())
+    config_module.ConfigStore(tmp_path).write_config({"gemini_api_key_storage": "keychain"})
 
     result = CliRunner().invoke(
         app,
-        ["run", project.id, "--data-dir", str(tmp_path), "--use-keychain"],
+        ["run", project.id, "--data-dir", str(tmp_path)],
     )
 
     assert result.exit_code == 0

@@ -17,10 +17,20 @@ GEMINI_API_KEY=... watson run PROJECT_ID --action all
 Or, to use the key you already saved in the app rather than an environment variable:
 
 ```sh
-watson run PROJECT_ID --action all --use-keychain
+watson run PROJECT_ID --action all
 ```
 
 By default, a rerun only processes work that's missing or previously failed. Add `--retry-all` to force a complete rerun of everything.
+
+## Code audit
+
+After completing the inventory and preregistration check and adding source files in the browser, run the optional source review with:
+
+```sh
+GEMINI_API_KEY=... watson run PROJECT_ID --action code_audit
+```
+
+The audit checks reported analyses against both the manuscript and preregistration. It never executes uploaded code or reads raw data. See [Code audit](code-audit.md) for the scope and interpretation of its results.
 
 ## Importing files without the browser
 

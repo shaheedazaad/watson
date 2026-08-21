@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Results · {{ project.name }} · Watson{% endblock %}
+{% block content %}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <ol>
+    <li><a href="{{ url() }}">Projects</a></li>
+    <li aria-hidden="true"><span>/</span></li>
+    <li><a href="{{ url('projects/' + project.id) }}">{{ project.name }}</a></li>
+    <li aria-hidden="true"><span>/</span></li>
+    <li aria-current="page"><span>Results</span></li>
+  </ol>
+</nav>
+{% set active_tab = 'results' %}{% include "_project_tabs.html" %}
+
+<div class="page-heading">
+  <div><h1 class="page-title">Results</h1><p class="lede">A compact overview of the documents and study checks for this project.</p></div>
+  <div class="header-actions field-row"><a class="btn" data-variant="outline" href="{{ url('projects/' + project.id) }}">Back to overview</a></div>
+</div>
+
+{% if summary.has_result %}
+{% include "_result_metrics.html" %}
+{% if summary.usage %}<p class="resource-line">Last run: {{ summary.usage.requests|default(0) }} model request{% if summary.usage.requests|default(0) != 1 %}s{% endif %} · {{ summary.usage.total_tokens|default(0) }} total tokens</p>{% endif %}
+<nav class="result-check-tabs" aria-label="Result checks">
+  {% for kind, label in [('inventory', 'Inventory'), ('preregistration', 'Preregistration'), ('code-audit', 'Code audit')] %}
+    {% if kind in available_checks %}<a class="{% if selected_check == kind %}active{% endif %}" href="{{ url('projects/' + project.id + '/results') }}?check={{ kind }}">{{ label }}</a>{% else %}<span aria-disabled="true">{{ label }}</span>{% endif %}
+  {% endfor %}
+</nav>
+{% if summary.warnings %}
+<details class="warning-card" open>
+  <summary><span>Warnings and review notes</span><span class="badge" data-variant="outline">{{ summary.warnings|length }}</span></summary>
+  <ul>{% for warning in summary.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+</details>
+{% endif %}
+{% if selected_check == 'inventory' and selected_report %}
+<div class="card study-results-card"><header><div><h2>Documents</h2><p class="muted">{{ selected_report.documents|length }} classified documents</p></div></header><section><ul>{% for document in selected_report.documents %}<li><strong>{{ document.file_path }}</strong> — {{ document.document_type|replace('_', ' ') }}</li>{% endfor %}</ul></section></div>
+{% elif selected_check == 'code-audit' and selected_report %}
+<div class="card study-results-card"><header><div><h2>Code audit</h2><p class="muted">Each reported analysis is checked against both the manuscript and preregistration. Uploaded code was never executed.</p></div></header><section><div class="code-audit-studies">{% for audit in selected_report.audits %}{% include "_code_audit_study.html" %}{% else %}<p class="muted">No code-audit findings are available.</p>{% endfor %}</div></section></div>
+{% elif selected_check == 'preregistration' and summary.items %}
+<div class="card study-results-card">
+  <header><div><h2>Study results</h2><p class="muted">Select a study to read its assessment and specific findings</p></div></header>
+  <section>
+  <div class="study-browser">{% for item in items %}{% include "_study_result.html" %}{% endfor %}</div>
+  {% if item_pages > 1 %}<nav class="pagination">{% if item_page > 1 %}<a href="{{ url('projects/' + project.id + '/results') }}?item_page={{ item_page - 1 }}">Previous</a>{% endif %}<span>Page {{ item_page }} of {{ item_pages }}</span>{% if item_page < item_pages %}<a href="{{ url('projects/' + project.id + '/results') }}?item_page={{ item_page + 1 }}">Next</a>{% endif %}</nav>{% endif %}
+  </section>
+</div>
+{% elif selected_check in available_checks %}
+<section class="next-step"><div><h2>Result needs attention</h2><p>This completed check could not be displayed. Its downloadable result is still kept with the project.</p></div></section>
+{% endif %}
+{% else %}
+<section class="next-step"><span class="step-badge">1</span><div><h2>No result yet</h2><p>Run Watson from the project overview to see results here.</p></div></section>
+{% endif %}
+{% endblock %}

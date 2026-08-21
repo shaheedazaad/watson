@@ -1,0 +1,12 @@
+<div class="code-audit-retry" role="status">
+  <div>
+    <h4>Code audit needs a rerun</h4>
+    <p>{{ audit.failure_message or 'Watson could not complete this code audit. Re-run it to try again.' }}</p>
+    {% if audit.error %}<details><summary>Technical details</summary><code>{{ audit.error }}</code></details>{% endif %}
+  </div>
+  <form action="{{ url('projects/' + project.id + '/runs') }}" method="post">
+    <input type="hidden" name="action" value="code_audit">
+    <input type="hidden" name="overwrite_completed" value="yes">
+    <button class="btn" type="submit">Re-run code audit</button>
+  </form>
+</div>

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from watson.schemas import (
     DocumentClassification,
+    CodeAuditResult,
     PreregistrationMatch,
     StudyDeviationReport,
     StudyExtractionResult,
@@ -11,6 +12,7 @@ from watson.schemas import (
 def test_gemini_response_schemas_do_not_use_additional_properties() -> None:
     for schema_model in [
         DocumentClassification,
+        CodeAuditResult,
         PreregistrationMatch,
         StudyDeviationReport,
         StudyExtractionResult,

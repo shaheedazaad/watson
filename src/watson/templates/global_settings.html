@@ -35,12 +35,11 @@
 
   <details class="settings-form" open>
     <summary>Gemini credential
-      {% if credential_state.session_loaded %}<span class="badge status complete">ready this session</span>
-      {% elif credential_state.has_legacy_key %}<span class="badge status running">migration available</span>
-      {% elif credential_state.has_saved_key %}<span class="badge status running">not loaded</span>
+      {% if credential_state.has_legacy_key %}<span class="badge status running">migration available</span>
+      {% elif credential_state.has_saved_key %}<span class="badge status complete">saved</span>
       {% else %}<span class="badge status failed">not configured</span>{% endif %}
     </summary>
-    <p class="muted">Watson never accesses {{ credential_store_name }} during launch, page loads, updates, or processing. Only the clearly labelled actions below can read, write, or delete the saved key. The key is held in memory after an explicit save or load and disappears when Watson closes.</p>
+    <p class="muted">Watson never accesses {{ credential_store_name }} during launch, page loads, or updates. It reads the saved key only when you start a run, then keeps it in memory until Watson closes.</p>
 
     {% if credential_state.has_legacy_key %}
     <div class="alert alert-warning"><section><p>An API key from an earlier Watson version is still in the old local file vault. Watson will not load it into the session or migrate it automatically.</p></section></div>
@@ -53,27 +52,13 @@
     </form>
     {% endif %}
 
-    {% if credential_state.has_saved_key and not credential_state.session_loaded %}
-    <div class="alert alert-warning"><section><p>A key is recorded as saved, but Watson has not accessed it in this session. After an update, use this explicit reconnect step; your operating system may ask you to approve access again.</p></section></div>
-    <form action="{{ url('credentials/load') }}" method="post">
-      <button class="btn" type="submit">Load from {{ credential_store_name }} for this session</button>
-      <p class="action-note">Explicit credential-store read: this is the only action that loads an already-saved key.</p>
-    </form>
-    {% elif credential_state.session_loaded %}
-    <div class="alert alert-success"><section><p>The API key is available in memory for this Watson session.</p></section></div>
-    <form action="{{ url('credentials/forget') }}" method="post">
-      <button class="btn" data-variant="outline" type="submit">Remove key from this session</button>
-      <p class="action-note">Does not access or delete the saved Keychain item.</p>
-    </form>
-    {% endif %}
-
     <form action="{{ url('credentials') }}" method="post">
       <div class="field">
         <label for="settings-api-key">{% if credential_state.has_saved_key %}Replace{% else %}Add{% endif %} Gemini API key</label>
         <input id="settings-api-key" class="input" type="password" name="api_key" autocomplete="off" placeholder="Paste a new key" required>
       </div>
       <button class="btn" type="submit">Save to {{ credential_store_name }}</button>
-      <p class="action-note">Explicit credential-store write: saving also loads the new key into this session. Your operating system may ask you to approve access.</p>
+      <p class="action-note">Saving writes to {{ credential_store_name }}. Future runs access this saved key only when needed; your operating system may ask you to approve access then.</p>
     </form>
     {% if credential_state.has_saved_key %}
     <form action="{{ url('credentials/delete') }}" method="post">
