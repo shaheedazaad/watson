@@ -1,7 +1,7 @@
 # Watson
 
-!!! warning "Unvalidated assistance tool"
-    Watson is an unvalidated tool to help audit preregistrations. It is not designed to be used unattended to make judgements about a paper. Treat its output as prompts for verification against the original documents.
+!!! warning "Important"
+Watson is an unvalidated tool to help audit preregistrations. It is not designed to be used unattended to make judgements about a paper. Treat its output as prompts for verification against the original documents.
 
 Watson helps you check whether a published study followed its preregistration. You give it the article and the preregistration; it reads both, finds every study inside the article, and tells you what was promised, what was actually done, and where the two disagree.
 
