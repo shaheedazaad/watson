@@ -1,5 +1,3 @@
-# Watson
-
 !!! warning "Important"
     Watson is an unvalidated tool to help audit preregistrations. It is not designed to be used unattended to make judgements about a paper. Treat its output as prompts for verification against the original documents.
 
